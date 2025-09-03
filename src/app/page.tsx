@@ -7,11 +7,12 @@ import PromotionTable from '@/components/PromotionTable';
 import MonthlyPromotionTable from '@/components/MonthlyPromotionTable';
 import ProductReplacementModal from '@/components/ProductReplacementModal';
 import CategoryAlternativeModal from '@/components/CategoryAlternativeModal';
-import { processProductCSV, generateWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, replaceProductInPlan, calculateGPPercentage, filterEligibleProducts, getStockStatusSummary, validateDailyCategoryAvailability, validateWeeklyCategoryAvailability, getAlternativeCategories } from '@/lib/dataProcessor';
+import { processProductCSV, generateDailyPromotionPlan, generateWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, replaceProductInPlan, calculateGPPercentage, filterEligibleProducts, getStockStatusSummary, validateDailyCategoryAvailability, validateWeeklyCategoryAvailability, getAlternativeCategories } from '@/lib/dataProcessor';
 import { saveWeeklyPlan } from '@/lib/supabaseActions';
-import { Product, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections } from '@/lib/types';
+import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections } from '@/lib/types';
 import DailyCategorySelector from '@/components/DailyCategorySelector';
 import WeeklyCategorySelector from '@/components/WeeklyCategorySelector';
+import ProductSearchModal from '@/components/ProductSearchModal';
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -40,7 +41,10 @@ export default function Home() {
     ['Random', 'Random', 'Random']  // Week 4
   ]);
   
-  const [planningMode, setPlanningMode] = useState<'weekly' | 'monthly'>('weekly');
+  const [dailyPlan, setDailyPlan] = useState<DayPlan | null>(null);
+  const [singleDaySelections, setSingleDaySelections] = useState<[string, string, string]>(['Random', 'Random', 'Random']);
+  
+  const [planningMode, setPlanningMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   
   // Replacement modal state
@@ -63,6 +67,8 @@ export default function Home() {
     pendingSelections: null as DailyCategorySelections | WeeklyCategorySelections | null,
     isMonthly: false
   });
+
+  const [isAddProductOpen, setIsAddProductOpen] = useState<boolean>(false);
 
   const handleFileUpload = async (file: File) => {
     setLoading(true);
@@ -129,7 +135,14 @@ export default function Home() {
     setSuccess(null);
 
     try {
-      if (planningMode === 'weekly') {
+      if (planningMode === 'daily') {
+        // Generate daily promotion plan
+        const plan = generateDailyPromotionPlan(products, singleDaySelections);
+        setDailyPlan(plan);
+        setWeeklyPlan(null);
+        setMonthlyPlan(null);
+        setSuccess(`Successfully generated a daily promotion plan with ${plan.products.length} products!`);
+      } else if (planningMode === 'weekly') {
         // Validate category availability for weekly plan
         const validation = validateDailyCategoryAvailability(products, dailySelections);
         
@@ -375,6 +388,7 @@ export default function Home() {
     // Reset everything to initial state
     setProducts([]);
     setUniqueCategories([]);
+    setDailyPlan(null);
     setWeeklyPlan(null);
     setMonthlyPlan(null);
     // Reset daily selections
@@ -406,6 +420,7 @@ export default function Home() {
 
   const handleWeeklyReset = () => {
     // Reset only the plans but keep the uploaded products and categories
+    setDailyPlan(null);
     setWeeklyPlan(null);
     setMonthlyPlan(null);
     // Reset daily selections
@@ -441,6 +456,21 @@ export default function Home() {
     const availableLength = maxLength - extension.length - 4; // 4 for "..." and "."
     
     return `${nameWithoutExt.slice(0, availableLength)}...${extension}`;
+  };
+
+  const handleAddIndividualProduct = (product: Product) => {
+    if (!dailyPlan) return;
+    // Prevent duplicates
+    const alreadyIncluded = dailyPlan.products.some(p => p.product_id === product.product_id);
+    if (alreadyIncluded) {
+      setSuccess(`Product ${product.product_id} is already in the plan.`);
+      setTimeout(() => setSuccess(null), 2000);
+      return;
+    }
+    const updated = { ...dailyPlan, products: [...dailyPlan.products, product] };
+    setDailyPlan(updated);
+    setSuccess(`Added product ${product.product_id} to the plan.`);
+    setTimeout(() => setSuccess(null), 2000);
   };
 
   return (
@@ -509,6 +539,7 @@ export default function Home() {
                     onClick={() => {
                       setProducts([]);
                       setUniqueCategories([]);
+                      setDailyPlan(null);
                       setWeeklyPlan(null);
                       setMonthlyPlan(null);
                       // Reset daily selections
@@ -569,6 +600,16 @@ export default function Home() {
               <h3 className="text-lg font-semibold text-charcoal mb-4">Planning Mode</h3>
               <div className="flex justify-center gap-4">
                 <button
+                  onClick={() => setPlanningMode('daily')}
+                  className={`px-6 py-3 rounded-lg font-medium transition-colors ${
+                    planningMode === 'daily'
+                      ? 'bg-primary text-white'
+                      : 'bg-gray-100 text-charcoal hover:bg-gray-200'
+                  }`}
+                >
+                  📋 Daily Planning
+                </button>
+                <button
                   onClick={() => setPlanningMode('weekly')}
                   className={`px-6 py-3 rounded-lg font-medium transition-colors ${
                     planningMode === 'weekly'
@@ -593,199 +634,388 @@ export default function Home() {
           </div>
         )}
 
-        {/* Daily Category Selector - Only show after CSV is processed and in weekly mode */}
+        {/* Daily Category Selector - Only show after CSV is processed and in daily mode */}
+        {uniqueCategories.length > 0 && planningMode === 'daily' && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h3 className="text-lg font-semibold text-charcoal mb-4">Daily Category Selection</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Select 3 categories for your daily promotion plan. Each category will provide 3 products (9 products total).
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {[0, 1, 2].map((categoryIndex) => (
+                <div key={categoryIndex}>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Category {categoryIndex + 1} (3 products)
+                  </label>
+                  <select
+                    value={singleDaySelections[categoryIndex]}
+                    onChange={(e) => {
+                      const newSelections = [...singleDaySelections] as [string, string, string];
+                      newSelections[categoryIndex] = e.target.value;
+                      setSingleDaySelections(newSelections);
+                    }}
+                    disabled={loading}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="Random">🎲 Random Selection</option>
+                    {uniqueCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-blue-800">Daily Planning</h3>
+                  <div className="mt-1 text-sm text-blue-700">
+                    <p>• Select 3 categories for your daily promotion plan</p>
+                    <p>• Each category will provide 3 products (9 products total)</p>
+                    <p>• You can select the same category multiple times for variety</p>
+                    <p>• Use "Random" to let the system choose any available product</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Weekly Category Selector - Only show after CSV is processed and in weekly mode */}
         {uniqueCategories.length > 0 && planningMode === 'weekly' && (
-          <DailyCategorySelector 
-            categories={uniqueCategories} 
-            dailySelections={dailySelections}
-            onSelectionsChange={setDailySelections}
-            disabled={loading}
-          />
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h3 className="text-lg font-semibold text-charcoal mb-4">Weekly Category Selection</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Select 3 categories for each week of your monthly promotion plan. Each category will provide 3 products (9 products total).
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {[0, 1, 2].map((weekIndex) => (
+                <div key={weekIndex}>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Week {weekIndex + 1} (3 categories)
+                  </label>
+                  <select
+                    value={weeklySelections[weekIndex][0]}
+                    onChange={(e) => {
+                      const newSelections = [...weeklySelections];
+                      newSelections[weekIndex][0] = e.target.value;
+                      setWeeklySelections(newSelections);
+                    }}
+                    disabled={loading}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="Random">🎲 Random Selection</option>
+                    {uniqueCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-blue-800">Weekly Planning</h3>
+                  <div className="mt-1 text-sm text-blue-700">
+                    <p>• Select 3 categories for each week of your monthly promotion plan</p>
+                    <p>• Each category will provide 3 products (9 products total)</p>
+                    <p>• You can select the same category multiple times for variety</p>
+                    <p>• Use "Random" to let the system choose any available product</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
-        {/* Weekly Category Selector - Only show after CSV is processed and in monthly mode */}
-        {uniqueCategories.length > 0 && planningMode === 'monthly' && (
-          <WeeklyCategorySelector 
-            categories={uniqueCategories} 
-            weeklySelections={weeklySelections}
-            onSelectionsChange={setWeeklySelections}
-            disabled={loading}
-          />
-        )}
-
-        {/* Generate Plan Button - Only show after categories are available */}
+        {/* Generate Plan Button Section */}
         {uniqueCategories.length > 0 && !loading && (
           <div className="text-center mb-8">
             <div className="flex flex-col items-center gap-4">
               <button
                 onClick={handleGeneratePlan}
-                className="inline-flex items-center px-8 py-4 border border-transparent text-lg font-semibold rounded-lg text-white bg-primary hover:bg-pale-teal focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors duration-200 shadow-lg"
+                disabled={loading}
+                className={`px-8 py-4 rounded-lg font-semibold text-lg transition-colors ${
+                  loading
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-primary text-white hover:bg-pale-teal focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary'
+                }`}
               >
-                {planningMode === 'weekly' ? '📅 Generate Weekly Plan' : '🗓️ Generate Monthly Plan'}
-              </button>
-              
-              {/* Reset buttons when plans exist */}
-              {(weeklyPlan || monthlyPlan) && (
-                <div className="flex gap-4">
-                  <button
-                    onClick={handleWeeklyReset}
-                    className="inline-flex items-center px-4 py-2 border border-primary text-sm font-medium rounded-lg text-primary bg-white hover:bg-primary hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors duration-200"
-                    title="Reset plans but keep products and categories"
-                  >
-                    🔄 Reset Plans
-                  </button>
-                  
-                  <button
-                    onClick={handleCompleteReset}
-                    className="inline-flex items-center px-4 py-2 border border-danger text-sm font-medium rounded-lg text-danger bg-white hover:bg-danger hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-danger transition-colors duration-200"
-                    title="Complete reset - clear everything and start fresh"
-                  >
-                    🗑️ Complete Reset
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        
-
-
-
-        {/* Status Messages */}
-        {error && (
-          <div className="mb-6 bg-red-50 border border-danger rounded-md p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-danger" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-danger">Error</h3>
-                <div className="mt-2 text-sm text-charcoal">
-                  {error}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {success && (
-          <div className="mb-6 bg-green-50 border border-success rounded-md p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-success" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-success">Success</h3>
-                <div className="mt-2 text-sm text-charcoal">
-                  {success}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading && (
-          <div className="text-center py-8">
-            <div className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-primary bg-primary bg-opacity-10">
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Processing CSV and generating promotion plan...
-            </div>
-          </div>
-        )}
-
-        {/* Action Buttons */}
-        {((weeklyPlan && planningMode === 'weekly') || (monthlyPlan && planningMode === 'monthly')) && !loading && (
-          <div className="text-center mb-8 print-hidden">
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              
-              {/* Print Button */}
-              <button
-                onClick={() => window.print()}
-                className="inline-flex items-center px-6 py-3 border border-primary text-base font-semibold rounded-lg text-primary bg-white hover:bg-light-grey focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors duration-200 shadow-md"
-                title="Print your promotion plan in a clean, professional format"
-              >
-                🖨️ Print Plan
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Generating...
+                  </span>
+                ) : (
+                  <>
+                    {planningMode === 'daily' && '📋 Generate Daily Plan'}
+                    {planningMode === 'weekly' && '📅 Generate Weekly Plan'}
+                    {planningMode === 'monthly' && '🗓️ Generate Monthly Plan'}
+                  </>
+                )}
               </button>
 
-              {/* Save Button - Only for weekly plans */}
-              {weeklyPlan && (
-                <button
-                  onClick={handleSavePlan}
-                  disabled={saving}
-                  className="inline-flex items-center px-8 py-4 border border-transparent text-lg font-semibold rounded-lg text-white bg-accent hover:bg-light-orange focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 shadow-lg"
-                >
-                  {saving ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              {/* Error and Success Messages */}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-2xl">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                       </svg>
-                      Saving to Supabase...
-                    </>
-                  ) : (
-                    'Save to Supabase'
-                  )}
-                </button>
+                    </div>
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-red-800">Error</h3>
+                      <p className="text-sm text-red-700 mt-1">{error}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {success && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 max-w-2xl">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-green-800">Success</h3>
+                      <p className="text-sm text-green-700 mt-1">{success}</p>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
 
-                  {/* Results Display - Only show after promotion plan is generated */}
-          {weeklyPlan && !loading && planningMode === 'weekly' && (
-            <div className="mb-8">
-              <PromotionTable 
-                weeklyPlan={weeklyPlan} 
-                onReplaceProduct={handleReplaceWeeklyProduct}
-                onPriceChange={handleWeeklyPriceChange}
-              />
+        {/* Daily Plan Display */}
+        {dailyPlan && (
+          <div className="mb-8 daily-plan-container">
+            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+              <div className="px-6 py-4 bg-charcoal border-b border-gray-200 flex justify-between items-center daily-plan-header">
+                <div>
+                  <h2 className="text-xl font-semibold text-white daily-plan-title">
+                    Daily Promotion Plan
+                  </h2>
+                  <p className="text-sm text-light-grey mt-1 daily-plan-date">
+                    {dailyPlan.dayName} - {new Date(dailyPlan.date).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="flex gap-3 no-print">
+                  <button
+                    onClick={() => window.print()}
+                    className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-light-orange transition-colors"
+                    title="Print daily plan"
+                  >
+                    🖨️ Print Plan
+                  </button>
+                  <button
+                    onClick={() => setIsAddProductOpen(true)}
+                    className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-pale-teal transition-colors"
+                    title="Add individual products"
+                  >
+                    ➕ Add Products Individually
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDailyPlan(null);
+                      setSingleDaySelections(['Random', 'Random', 'Random']);
+                      setSuccess('Daily plan cleared. Select new categories to generate another plan.');
+                      setTimeout(() => setSuccess(null), 3000);
+                    }}
+                    className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                    title="Clear daily plan"
+                  >
+                    🔄 New Plan
+                  </button>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-max divide-y divide-gray-200 daily-plan-table">
+                  <thead className="bg-light-grey">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-id">
+                        Product ID
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-name">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-brand">
+                        Brand
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-supplier">
+                        Supplier
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-category">
+                        Category
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-price">
+                        Regular Price (ZAR)
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-accent uppercase tracking-wider font-bold daily-print-col-sale">
+                        5% Sale Price (ZAR)
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-save">
+                        Save (ZAR)
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-views">
+                        Views
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-charcoal uppercase tracking-wider daily-print-col-stock">
+                        Stock Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {dailyPlan.products.map((product, productIndex) => (
+                      <tr key={productIndex} className={`hover:bg-pale-teal hover:bg-opacity-10 ${
+                        productIndex % 2 === 0 ? 'bg-white' : 'bg-light-grey'
+                      }`}>
+                        <td className="px-4 py-4 text-sm font-medium text-charcoal">
+                          {product.product_id}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          <div className="max-w-[280px] break-words" title={product.product_name}>
+                            {product.product_name}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          <div className="max-w-[120px] truncate" title={product.brand || 'N/A'}>
+                            {product.brand || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          <div className="max-w-[150px] truncate" title={product.supplier_name || 'N/A'}>
+                            {product.supplier_name || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full border border-primary text-primary bg-white">
+                            <div className="max-w-[100px] truncate" title={product.category?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"') || 'Uncategorized'}>
+                              {product.category?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"') || 'Uncategorized'}
+                            </div>
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          R{Math.round(product.regular_price)}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-accent font-bold">
+                          R{Math.round(product.five_percent_sale_price || 0)}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal font-medium">
+                          R{Math.round(product.regular_price - (product.five_percent_sale_price || 0))}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-charcoal">
+                          {product.views}
+                        </td>
+                        <td className="px-4 py-4 text-sm">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            product.stock_status === 'instock'
+                              ? 'bg-green-100 text-green-800'
+                              : product.stock_status === 'outofstock'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {product.stock_status === 'instock' ? 'In Stock' : 
+                             product.stock_status === 'outofstock' ? 'Out of Stock' : 
+                             product.stock_status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {dailyPlan.products.length === 0 && (
+                <div className="px-6 py-4 text-center text-gray-500">
+                  No products available for this day
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Monthly Results Display */}
-          {monthlyPlan && !loading && planningMode === 'monthly' && (
-            <div className="mb-8">
-              <MonthlyPromotionTable 
-                monthlyPlan={monthlyPlan} 
-                onReplaceProduct={handleReplaceMonthlyProduct}
-                onPriceChange={handleMonthlyPriceChange}
-              />
-            </div>
-          )}
+        {/* Monthly Promotion Table - Only show if monthly plan is generated */}
+        {monthlyPlan && (
+          <MonthlyPromotionTable
+            monthlyPlan={monthlyPlan}
+            onPriceChange={handleMonthlyPriceChange}
+            onReplaceProduct={handleReplaceMonthlyProduct}
+          />
+        )}
+
+        {/* Promotion Table - Only show if weekly plan is generated */}
+        {weeklyPlan && (
+          <PromotionTable
+            weeklyPlan={weeklyPlan}
+            onPriceChange={handleWeeklyPriceChange}
+            onReplaceProduct={handleReplaceWeeklyProduct}
+          />
+        )}
+
+        {/* Product Replacement Modal */}
+        {replacementModal.isOpen && replacementModal.productToReplace && (
+          <ProductReplacementModal
+            isOpen={replacementModal.isOpen}
+            productToReplace={replacementModal.productToReplace}
+            availableCategories={uniqueCategories}
+            allProducts={products}
+            usedProductIds={getUsedProductIds()}
+            onReplace={handleConfirmReplacement}
+            onCancel={handleCancelReplacement}
+          />
+        )}
+
+        {/* Category Alternative Modal */}
+        {categoryAlternativeModal.isOpen && (
+          <CategoryAlternativeModal
+            isOpen={categoryAlternativeModal.isOpen}
+            emptyCategories={categoryAlternativeModal.emptyCategories}
+            insufficientCategories={categoryAlternativeModal.insufficientCategories}
+            availableByCategory={categoryAlternativeModal.availableByCategory}
+            alternatives={categoryAlternativeModal.alternatives}
+            onConfirm={handleCategoryAlternativeConfirm}
+            onCancel={handleCategoryAlternativeCancel}
+          />
+        )}
+
+        {/* Modal: Add individual products */}
+        {dailyPlan && (
+          <ProductSearchModal
+            isOpen={isAddProductOpen}
+            allProducts={products}
+            excludedProductIds={new Set(dailyPlan.products.map(p => p.product_id))}
+            onAddProduct={(p) => { handleAddIndividualProduct(p); setIsAddProductOpen(false); }}
+            onClose={() => setIsAddProductOpen(false)}
+          />
+        )}
       </div>
-
-      {/* Product Replacement Modal */}
-      {replacementModal.productToReplace && (
-        <ProductReplacementModal
-          isOpen={replacementModal.isOpen}
-          productToReplace={replacementModal.productToReplace}
-          availableCategories={uniqueCategories}
-          allProducts={products}
-          usedProductIds={getUsedProductIds()}
-          onReplace={handleConfirmReplacement}
-          onCancel={handleCancelReplacement}
-        />
-      )}
-
-      {/* Category Alternative Modal */}
-      <CategoryAlternativeModal
-        isOpen={categoryAlternativeModal.isOpen}
-        emptyCategories={categoryAlternativeModal.emptyCategories}
-        insufficientCategories={categoryAlternativeModal.insufficientCategories}
-        availableByCategory={categoryAlternativeModal.availableByCategory}
-        alternatives={categoryAlternativeModal.alternatives}
-        onConfirm={handleCategoryAlternativeConfirm}
-        onCancel={handleCategoryAlternativeCancel}
-      />
     </div>
   );
 }

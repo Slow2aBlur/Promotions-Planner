@@ -337,6 +337,89 @@ export function getUniqueCategories(products: Product[]): string[] {
   return categories;
 }
 
+// Daily promotion plan generation
+export function generateDailyPromotionPlan(
+  allProducts: Product[], 
+  dailySelections: [string, string, string],
+  selectedDate?: Date
+): DayPlan {
+  // Apply business rules filtering first
+  const businessRuleFilteredProducts = filterEligibleProducts(allProducts);
+
+  // Filter out recently promoted products (can be enhanced later)
+  const eligibleProducts = businessRuleFilteredProducts;
+
+  // Use selected date or tomorrow as default
+  const targetDate = selectedDate || (() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow;
+  })();
+
+  const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' });
+  
+  // Track selected products to avoid duplicates within the day
+  const selectedProductIds = new Set<string>();
+  const dayProducts: Product[] = [];
+
+  // Get available products for this day
+  const availableProducts = eligibleProducts;
+  
+  // Iterate through the three selected categories for this day (each gets 3 products)
+  dailySelections.forEach(categoryChoice => {
+    let categoryProducts: Product[] = [];
+    
+    if (categoryChoice === 'Random') {
+      // Select 3 random products from available pool
+      const availableForSelection = availableProducts.filter(product => 
+        !selectedProductIds.has(product.product_id)
+      );
+      const shuffledProducts = [...availableForSelection].sort(() => Math.random() - 0.5);
+      categoryProducts = shuffledProducts.slice(0, 3);
+    } else {
+      // Select ALL available products from the specific category (up to 3)
+      const categoryAvailable = availableProducts
+        .filter(product => 
+          product.category === categoryChoice && 
+          !selectedProductIds.has(product.product_id)
+        )
+        .sort((a, b) => b.views - a.views);
+      
+      categoryProducts = categoryAvailable.slice(0, 3);
+      
+      // If we don't have enough products from this category, fill with random products
+      const remainingSlots = 3 - categoryProducts.length;
+      if (remainingSlots > 0) {
+        const usedIds = new Set([...selectedProductIds, ...categoryProducts.map(p => p.product_id)]);
+        const randomFillProducts = availableProducts
+          .filter(product => 
+            product.category !== categoryChoice && 
+            !usedIds.has(product.product_id)
+          )
+          .sort(() => Math.random() - 0.5)
+          .slice(0, remainingSlots);
+        
+        categoryProducts = [...categoryProducts, ...randomFillProducts];
+      }
+    }
+    
+    // Add selected products to the day and mark as used
+    categoryProducts.forEach(product => {
+      if (!selectedProductIds.has(product.product_id)) {
+        selectedProductIds.add(product.product_id);
+        dayProducts.push(product);
+      }
+    });
+  });
+
+  return {
+    date: targetDate,
+    dayName,
+    products: dayProducts,
+    selectedCategories: dailySelections
+  };
+}
+
 // Weekly promotion plan generation
 export function generateWeeklyPromotionPlan(
   allProducts: Product[], 
