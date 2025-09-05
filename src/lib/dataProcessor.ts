@@ -385,21 +385,49 @@ export function generateDailyPromotionPlan(
         )
         .sort((a, b) => b.views - a.views);
       
+      
       categoryProducts = categoryAvailable.slice(0, 3);
       
-      // If we don't have enough products from this category, fill with random products
+      // Sort products by 5% sale price (ascending - smallest to largest)
+      categoryProducts.sort((a, b) => (a.five_percent_sale_price || 0) - (b.five_percent_sale_price || 0));
+      
+      // If we don't have enough products from this category, try to find similar categories
       const remainingSlots = 3 - categoryProducts.length;
       if (remainingSlots > 0) {
         const usedIds = new Set([...selectedProductIds, ...categoryProducts.map(p => p.product_id)]);
-        const randomFillProducts = availableProducts
+        
+        // Try to find products from similar categories (e.g., if "Smart TV" is selected, try "Television" or other TV-related categories)
+        let similarCategoryProducts: Product[] = [];
+        
+        // Look for products from categories that contain similar keywords
+        const categoryKeywords = categoryChoice.toLowerCase().split(/[|&]/).map(k => k.trim());
+        similarCategoryProducts = availableProducts
           .filter(product => 
-            product.category !== categoryChoice && 
-            !usedIds.has(product.product_id)
+            !usedIds.has(product.product_id) &&
+            categoryKeywords.some(keyword => 
+              product.category.toLowerCase().includes(keyword)
+            )
           )
-          .sort(() => Math.random() - 0.5)
+          .sort((a, b) => b.views - a.views)
           .slice(0, remainingSlots);
         
-        categoryProducts = [...categoryProducts, ...randomFillProducts];
+        // If still not enough, only then fall back to random products (but this should rarely happen)
+        if (similarCategoryProducts.length < remainingSlots) {
+          const additionalRandom = availableProducts
+            .filter(product => 
+              !usedIds.has(product.product_id) &&
+              !similarCategoryProducts.some(p => p.product_id === product.product_id)
+            )
+            .sort(() => Math.random() - 0.5)
+            .slice(0, remainingSlots - similarCategoryProducts.length);
+          
+          similarCategoryProducts = [...similarCategoryProducts, ...additionalRandom];
+        }
+        
+        categoryProducts = [...categoryProducts, ...similarCategoryProducts];
+        
+        // Re-sort the combined products by 5% sale price (ascending - smallest to largest)
+        categoryProducts.sort((a, b) => (a.five_percent_sale_price || 0) - (b.five_percent_sale_price || 0));
       }
     }
     
@@ -412,11 +440,119 @@ export function generateDailyPromotionPlan(
     });
   });
 
+  // Sort all daily products by 5% sale price (ascending - smallest to largest)
+  dayProducts.sort((a, b) => (a.five_percent_sale_price || 0) - (b.five_percent_sale_price || 0));
+
   return {
     date: targetDate,
     dayName,
     products: dayProducts,
     selectedCategories: dailySelections
+  };
+}
+
+// Flexible weekly promotion plan generation
+export function generateFlexibleWeeklyPromotionPlan(
+  allProducts: Product[], 
+  weeklySelections: Array<string[]>,
+  weekConfigs: Array<{ startDate: string, endDate: string, targetGPMargin?: number }>,
+  categoryConfig: { numberOfCategories: number, productsPerCategory: number }
+): WeeklyPlan {
+  // Apply business rules filtering first
+  const businessRuleFilteredProducts = filterEligibleProducts(allProducts);
+  const eligibleProducts = businessRuleFilteredProducts;
+  
+  const selectedProductIds = new Set<string>();
+  
+  const days: DayPlan[] = [];
+  
+  // Generate days for each week based on the custom date ranges
+  weekConfigs.forEach((weekConfig, weekIndex) => {
+    const startDate = new Date(weekConfig.startDate);
+    const endDate = new Date(weekConfig.endDate);
+    const weekSelections = weeklySelections[weekIndex] || ['Random', 'Random', 'Random'];
+    const targetGPMargin = weekConfig.targetGPMargin || 0;
+    
+    // Generate all days between start and end date (inclusive)
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const dayName = currentDate.toLocaleDateString('en-US', { weekday: 'long' });
+      const dayProducts: Product[] = [];
+      
+      // Get available products for this day (not used in any previous day)
+      const availableProducts = eligibleProducts.filter(product => 
+        !selectedProductIds.has(product.product_id)
+      );
+      
+      // Iterate through the three selected categories for this week (each gets 3 products per day)
+      weekSelections.forEach(categoryChoice => {
+        let categoryProducts: Product[] = [];
+        
+        if (categoryChoice === 'Random') {
+          // Select 3 random products from available pool
+          const availableForSelection = availableProducts.filter(product => 
+            !selectedProductIds.has(product.product_id)
+          );
+          const shuffledProducts = [...availableForSelection].sort(() => Math.random() - 0.5);
+          categoryProducts = shuffledProducts.slice(0, categoryConfig.productsPerCategory);
+        } else {
+          // Select top 3 products by views from the specific category
+          categoryProducts = availableProducts
+            .filter(product => 
+              product.category === categoryChoice && 
+              !selectedProductIds.has(product.product_id)
+            )
+            .sort((a, b) => b.views - a.views)
+            .slice(0, categoryConfig.productsPerCategory);
+        }
+        
+        // Apply target GP margin to selected products
+        if (targetGPMargin !== 0) {
+          categoryProducts = categoryProducts.map(product => {
+            const newProduct = { ...product };
+            // Calculate new sale price based on target GP margin
+            // GP% = (Sale Price - Purchase Cost) / Sale Price * 100
+            // Sale Price = Purchase Cost / (1 - GP% / 100)
+            const newSalePrice = newProduct.purchase_cost / (1 - targetGPMargin / 100);
+            newProduct.custom_sale_price = newSalePrice;
+            newProduct.custom_gp_percentage = targetGPMargin;
+            return newProduct;
+          });
+        }
+        
+        // Add selected products to the day and mark as used
+        categoryProducts.forEach(product => {
+          if (!selectedProductIds.has(product.product_id)) {
+            selectedProductIds.add(product.product_id);
+            dayProducts.push(product);
+          }
+        });
+      });
+
+      // Sort all daily products by custom sale price or 5% sale price (ascending - smallest to largest)
+      dayProducts.sort((a, b) => {
+        const priceA = a.custom_sale_price || a.five_percent_sale_price || 0;
+        const priceB = b.custom_sale_price || b.five_percent_sale_price || 0;
+        return priceA - priceB;
+      });
+
+      days.push({
+        date: new Date(currentDate),
+        dayName,
+        products: dayProducts,
+        selectedCategories: weekSelections as [string, string, string]
+      });
+
+      // Move to next day
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+  });
+
+  return {
+    weekNumber: 1,
+    days,
+    startDate: new Date(weekConfigs[0].startDate),
+    endDate: new Date(weekConfigs[weekConfigs.length - 1].endDate)
   };
 }
 

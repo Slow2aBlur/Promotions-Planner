@@ -38,7 +38,8 @@ export default function ProductSearchModal({
       const nameMatch = normalize(p.product_name).includes(q);
       const brandMatch = normalize(p.brand || "").includes(q);
       const supplierMatch = normalize(p.supplier_name || "").includes(q);
-      return idMatch || nameMatch || brandMatch || supplierMatch;
+      const categoryMatch = normalize(p.category || "").includes(q);
+      return idMatch || nameMatch || brandMatch || supplierMatch || categoryMatch;
     });
     return matches.slice(0, 25);
   }, [query, allProducts, excludedProductIds]);
@@ -70,7 +71,7 @@ export default function ProductSearchModal({
 
         <div className="mb-4">
           <label htmlFor="product-search" className="mb-1 block text-sm font-medium text-charcoal">
-            Search by product ID, name, brand, or supplier
+            Search by product ID, name, brand, supplier, or category
           </label>
           <input
             id="product-search"
@@ -90,13 +91,14 @@ export default function ProductSearchModal({
                 <th className="px-3 py-2 text-left font-medium text-charcoal">Name</th>
                 <th className="w-28 px-3 py-2 text-left font-medium text-charcoal">Brand</th>
                 <th className="w-32 px-3 py-2 text-left font-medium text-charcoal">Supplier</th>
+                <th className="w-32 px-3 py-2 text-left font-medium text-charcoal">Category</th>
                 <th className="w-24 px-3 py-2 text-left font-medium text-charcoal">Add</th>
               </tr>
             </thead>
             <tbody>
               {results.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-gray-500">
+                  <td colSpan={6} className="px-3 py-6 text-center text-gray-500">
                     {query ? "No products found for your search." : "Start typing to search for products."}
                   </td>
                 </tr>
@@ -109,6 +111,7 @@ export default function ProductSearchModal({
                     </td>
                     <td className="truncate px-3 py-2 text-charcoal">{p.brand || ""}</td>
                     <td className="truncate px-3 py-2 text-charcoal">{p.supplier_name || ""}</td>
+                    <td className="truncate px-3 py-2 text-charcoal">{p.category || ""}</td>
                     <td className="px-3 py-2">
                       <button
                         onClick={() => onAddProduct(p)}

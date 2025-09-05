@@ -42,7 +42,7 @@ export interface MonthlyPlan {
 
 // New types for category selections
 export type DailyCategorySelections = Array<[string, string, string]>; // 7 days of 3 categories each
-export type WeeklyCategorySelections = Array<[string, string, string]>; // 4-5 weeks of 3 categories each
+export type WeeklyCategorySelections = Array<string[]>; // Dynamic number of categories per week
 
 export interface PromotionRecord {
   id?: string;
@@ -54,3 +54,15 @@ export interface PromotionRecord {
 }
 
 export type PromotionStrategy = 'category' | 'brand' | 'random';
+
+// Weekly configuration types
+export interface WeekConfig {
+  startDate: string;
+  endDate: string;
+  targetGPMargin?: number; // Target GP margin percentage for this week
+}
+
+export interface WeeklyConfiguration {
+  numberOfWeeks: number;
+  weeks: WeekConfig[];
+}

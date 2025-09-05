@@ -14,6 +14,19 @@ interface PromotionTableProps {
 
 export default function PromotionTable({ weeklyPlan, onReplaceProduct, onPriceChange }: PromotionTableProps) {
   
+  const abbreviateDayName = (dayName: string): string => {
+    const dayMap: { [key: string]: string } = {
+      'Monday': 'Mon',
+      'Tuesday': 'Tue', 
+      'Wednesday': 'Wed',
+      'Thursday': 'Thu',
+      'Friday': 'Fri',
+      'Saturday': 'Sat',
+      'Sunday': 'Sun'
+    };
+    return dayMap[dayName] || dayName;
+  };
+
   const handlePriceChange = (dayIndex: number, productIndex: number) => (productId: string, newPrice: number, newGP: number) => {
     if (onPriceChange) {
       onPriceChange(dayIndex, productIndex, newPrice, newGP);
@@ -36,7 +49,7 @@ export default function PromotionTable({ weeklyPlan, onReplaceProduct, onPriceCh
             <div key={dayIndex} className="border-b border-gray-200 last:border-b-0 print-break-inside-avoid">
               <div className="px-6 py-4 bg-primary">
                 <h3 className="text-lg font-bold text-white">
-                  {day.dayName} - {formatDisplayDate(day.date)}
+                  {abbreviateDayName(day.dayName)} - {formatDisplayDate(day.date)}
                 </h3>
               </div>
               

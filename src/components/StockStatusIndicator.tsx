@@ -25,18 +25,6 @@ export default function StockStatusIndicator({ stockStatus, size = 'md' }: Stock
           priority: 'high'
         };
       
-      case 'onbackorder':
-      case 'on-backorder':
-      case 'backorder':
-        return {
-          label: 'Back Order',
-          color: 'bg-yellow-500',
-          textColor: 'text-yellow-700',
-          bgColor: 'bg-yellow-50',
-          borderColor: 'border-yellow-200',
-          icon: '📦',
-          priority: 'medium'
-        };
       
       case 'instock':
       case 'in-stock':
@@ -105,7 +93,7 @@ export default function StockStatusIndicator({ stockStatus, size = 'md' }: Stock
 // Helper function to check if a product needs stock attention
 export function needsStockAttention(stockStatus: string): boolean {
   const normalizedStatus = stockStatus.toLowerCase().trim();
-  return ['outofstock', 'out-of-stock', 'oos', 'onbackorder', 'on-backorder', 'backorder', 'lowstock', 'low-stock'].includes(normalizedStatus);
+  return ['outofstock', 'out-of-stock', 'oos', 'lowstock', 'low-stock'].includes(normalizedStatus);
 }
 
 // Helper function to get stock priority for sorting
@@ -118,9 +106,6 @@ export function getStockPriority(stockStatus: string): number {
     case 'oos':
       return 3; // Highest priority (most attention needed)
     
-    case 'onbackorder':
-    case 'on-backorder':
-    case 'backorder':
     case 'lowstock':
     case 'low-stock':
       return 2; // Medium priority

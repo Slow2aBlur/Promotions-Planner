@@ -47,7 +47,7 @@ export default function MonthlyPromotionTable({ monthlyPlan, onReplaceProduct, o
                     Week {week.weekNumber}: {formatDisplayDate(week.startDate)} - {formatDisplayDate(week.endDate)}
                   </h3>
                   <div className="mt-2 sm:mt-0 flex flex-wrap gap-2">
-                    {week.selectedCategories.map((category, index) => (
+                    {week.days[0]?.selectedCategories.map((category, index) => (
                       <span
                         key={index}
                         className={`px-2 py-1 rounded-full text-xs font-medium ${

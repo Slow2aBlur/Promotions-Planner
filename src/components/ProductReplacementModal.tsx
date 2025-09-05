@@ -25,12 +25,15 @@ export default function ProductReplacementModal({
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [searchMode, setSearchMode] = useState<'category' | 'search'>('category');
 
   if (!isOpen) return null;
 
   const handleCategoryChange = (category: string) => {
     setSelectedCategory(category);
     setSelectedProduct(null);
+    setSearchMode('category');
     
     if (category === '') {
       setAvailableProducts([]);
@@ -47,6 +50,35 @@ export default function ProductReplacementModal({
     // Sort by views (descending)
     categoryProducts.sort((a, b) => b.views - a.views);
     setAvailableProducts(categoryProducts);
+  };
+
+  const handleSearch = (term: string) => {
+    setSearchTerm(term);
+    setSelectedProduct(null);
+    setSearchMode('search');
+    
+    if (term.trim() === '') {
+      setAvailableProducts([]);
+      return;
+    }
+
+    const searchTermLower = term.toLowerCase();
+    const searchResults = allProducts.filter(product => {
+      // Search by product ID, name, SKU, supplier_price, sale_price
+      const matchesId = product.product_id.toLowerCase().includes(searchTermLower);
+      const matchesName = product.product_name.toLowerCase().includes(searchTermLower);
+      const matchesSku = (product as any).sku?.toLowerCase().includes(searchTermLower) || false;
+      const matchesSupplierPrice = (product as any).supplier_price?.toString().includes(searchTermLower) || false;
+      const matchesSalePrice = product.five_percent_sale_price?.toString().includes(searchTermLower) || false;
+      
+      return (matchesId || matchesName || matchesSku || matchesSupplierPrice || matchesSalePrice) &&
+             !usedProductIds.has(product.product_id) &&
+             product.product_id !== productToReplace.product_id;
+    });
+
+    // Sort by views (descending)
+    searchResults.sort((a, b) => b.views - a.views);
+    setAvailableProducts(searchResults);
   };
 
   const handleReplace = () => {
@@ -84,30 +116,81 @@ export default function ProductReplacementModal({
             </div>
           </div>
 
-          {/* Category Selection */}
+          {/* Search Mode Toggle */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-charcoal mb-2">
-              Choose Replacement Category:
-            </label>
-            <select
-              value={selectedCategory}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white text-charcoal"
-            >
-              <option value="">Select a category...</option>
-              <option value={productToReplace.category}>
-                🔄 Same Category ({productToReplace.category})
-              </option>
-              <optgroup label="--- Other Categories ---">
-                {availableCategories
-                  .filter(cat => cat !== productToReplace.category)
-                  .map((category) => (
-                    <option key={category} value={category}>
-                      📁 {category}
-                    </option>
-                  ))}
-              </optgroup>
-            </select>
+            <div className="flex gap-4 mb-4">
+              <button
+                onClick={() => {
+                  setSearchMode('category');
+                  setSearchTerm('');
+                  setAvailableProducts([]);
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  searchMode === 'category' 
+                    ? 'bg-primary text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                📁 Browse by Category
+              </button>
+              <button
+                onClick={() => {
+                  setSearchMode('search');
+                  setSelectedCategory('');
+                  setAvailableProducts([]);
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  searchMode === 'search' 
+                    ? 'bg-primary text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                🔍 Search Products
+              </button>
+            </div>
+
+            {searchMode === 'category' ? (
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-2">
+                  Choose Replacement Category:
+                </label>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white text-charcoal"
+                >
+                  <option value="">Select a category...</option>
+                  <option value={productToReplace.category}>
+                    🔄 Same Category ({productToReplace.category})
+                  </option>
+                  <optgroup label="--- Other Categories ---">
+                    {availableCategories
+                      .filter(cat => cat !== productToReplace.category)
+                      .map((category) => (
+                        <option key={category} value={category}>
+                          📁 {category}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-2">
+                  Search by Product ID, Name, SKU, or Price:
+                </label>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Enter product ID, name, SKU, or price..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white text-charcoal"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Search by: Product ID, Product Name, SKU, Supplier Price, or Sale Price
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Product Selection */}
@@ -130,10 +213,13 @@ export default function ProductReplacementModal({
                         <h5 className="text-sm font-medium text-charcoal mb-1">
                           {product.product_name}
                         </h5>
-                        <div className="flex gap-4 text-xs text-gray-600">
+                        <div className="flex flex-wrap gap-4 text-xs text-gray-600">
                           <span>Brand: {product.brand || 'N/A'}</span>
+                          <span>SKU: {(product as any).sku || 'N/A'}</span>
                           <span>Views: {product.views.toLocaleString()}</span>
-                          <span>Price: R{Math.round(product.regular_price)}</span>
+                          <span>Reg Price: R{Math.round(product.regular_price)}</span>
+                          {(product as any).supplier_price && <span>Supplier: R{Math.round((product as any).supplier_price)}</span>}
+                          {product.five_percent_sale_price && <span>Sale: R{Math.round(product.five_percent_sale_price)}</span>}
                         </div>
                       </div>
                       <div className="flex-shrink-0 ml-4">
