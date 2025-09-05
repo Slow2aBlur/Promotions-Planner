@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import FileUploader from '@/components/FileUploader';
 import PromotionTable from '@/components/PromotionTable';
@@ -10,6 +10,16 @@ import ProductReplacementModal from '@/components/ProductReplacementModal';
 import CategoryAlternativeModal from '@/components/CategoryAlternativeModal';
 import { processProductCSV, generateDailyPromotionPlan, generateWeeklyPromotionPlan, generateFlexibleWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, replaceProductInPlan, calculateGPPercentage, filterEligibleProducts, getStockStatusSummary, validateDailyCategoryAvailability, validateWeeklyCategoryAvailability, getAlternativeCategories } from '@/lib/dataProcessor';
 import { saveWeeklyPlan } from '@/lib/supabaseActions';
+import { 
+  createNewSession, 
+  getActiveSessions, 
+  setActiveSession, 
+  saveFullApplicationState, 
+  loadFullApplicationState, 
+  autoSaveApplicationState,
+  BackupSession,
+  FullApplicationState
+} from '@/lib/backupActions';
 import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeekConfig, WeeklyConfiguration } from '@/lib/types';
 import DailyCategorySelector from '@/components/DailyCategorySelector';
 import WeeklyCategorySelector from '@/components/WeeklyCategorySelector';
@@ -60,6 +70,50 @@ export default function Home() {
     productsPerCategory: 3
   });
 
+  // Expected sales quantity per product
+  const [expectedQuantity, setExpectedQuantity] = useState<number>(5);
+
+  // Ad-hoc plan state
+  const [adHocPlan, setAdHocPlan] = useState<{
+    isOpen: boolean;
+    products: Array<{
+      id: string;
+      productId: string;
+      product: Product | null;
+      targetPrice: number;
+      targetMargin: number;
+      inputMode: 'price' | 'margin';
+      quantity: number;
+    }>;
+    approvedProducts: Array<{
+      id: string;
+      productId: string;
+      product: Product;
+      targetPrice: number;
+      targetMargin: number;
+      quantity: number;
+      approvedAt: Date;
+    }>;
+    currentProductId: string;
+    maxProducts: number;
+  }>({
+    isOpen: false,
+    products: [],
+    approvedProducts: [],
+    currentProductId: '',
+    maxProducts: 30
+  });
+
+  // VAT rate constant (15% for South Africa)
+  const VAT_RATE = 0.15;
+
+  // Backup system state
+  const [backupSessionId, setBackupSessionId] = useState<string | null>(null);
+  const [availableSessions, setAvailableSessions] = useState<BackupSession[]>([]);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
+
   // Local state for date inputs to allow typing
   const [dateInputs, setDateInputs] = useState<{[key: string]: string}>({});
   
@@ -91,6 +145,135 @@ export default function Home() {
   });
 
   const [isAddProductOpen, setIsAddProductOpen] = useState<boolean>(false);
+
+  // BACKUP SYSTEM FUNCTIONS
+  
+  // Auto-save effect
+  useEffect(() => {
+    if (!autoSaveEnabled || !backupSessionId) return;
+
+    const autoSaveInterval = setInterval(async () => {
+      try {
+        const currentState: FullApplicationState = {
+          products,
+          dailyPlan,
+          weeklyPlan,
+          monthlyPlan,
+          adHocPlan,
+          dailySelections,
+          weeklySelections,
+          weeklyConfig,
+          weeklyCategoryConfig,
+          planningMode,
+          uniqueCategories,
+          uploadedFileName,
+          lastUploadedFile: null, // Can't save File objects
+          expectedQuantity
+        };
+
+        await autoSaveApplicationState(backupSessionId, currentState);
+        setLastAutoSave(new Date());
+      } catch (error) {
+        console.warn('Auto-save failed:', error);
+      }
+    }, 30000); // Auto-save every 30 seconds
+
+    return () => clearInterval(autoSaveInterval);
+  }, [autoSaveEnabled, backupSessionId, products, dailyPlan, weeklyPlan, monthlyPlan, adHocPlan]);
+
+  // Load sessions on component mount
+  useEffect(() => {
+    loadAvailableSessions();
+  }, []);
+
+  const loadAvailableSessions = async () => {
+    try {
+      const sessions = await getActiveSessions();
+      setAvailableSessions(sessions);
+      
+      // Set active session if available
+      const activeSession = sessions.find(s => s.is_active);
+      if (activeSession) {
+        setBackupSessionId(activeSession.id);
+      }
+    } catch (error) {
+      console.warn('Failed to load sessions:', error);
+    }
+  };
+
+  const createNewBackupSession = async () => {
+    try {
+      const sessionName = prompt('Enter session name:');
+      if (!sessionName) return;
+
+      const sessionId = await createNewSession(sessionName);
+      setBackupSessionId(sessionId);
+      await loadAvailableSessions();
+      setSuccess('New backup session created!');
+    } catch (error) {
+      setError('Failed to create backup session');
+    }
+  };
+
+  const loadBackupSession = async (sessionId: string) => {
+    try {
+      setLoading(true);
+      const state = await loadFullApplicationState(sessionId);
+      
+      // Restore all state
+      setProducts(state.products);
+      setDailyPlan(state.dailyPlan);
+      setWeeklyPlan(state.weeklyPlan);
+      setMonthlyPlan(state.monthlyPlan);
+      setAdHocPlan(state.adHocPlan);
+      setDailySelections(state.dailySelections);
+      setWeeklySelections(state.weeklySelections);
+      setWeeklyConfig(state.weeklyConfig);
+      setWeeklyCategoryConfig(state.weeklyCategoryConfig);
+      setPlanningMode(state.planningMode as any);
+      setUniqueCategories(state.uniqueCategories);
+      setUploadedFileName(state.uploadedFileName);
+      setExpectedQuantity(state.expectedQuantity);
+      setBackupSessionId(sessionId);
+      
+      setSuccess('Session restored successfully!');
+    } catch (error) {
+      setError('Failed to restore session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveCurrentSession = async () => {
+    if (!backupSessionId) {
+      await createNewBackupSession();
+      return;
+    }
+
+    try {
+      const currentState: FullApplicationState = {
+        products,
+        dailyPlan,
+        weeklyPlan,
+        monthlyPlan,
+        adHocPlan,
+        dailySelections,
+        weeklySelections,
+        weeklyConfig,
+        weeklyCategoryConfig,
+        planningMode,
+        uniqueCategories,
+        uploadedFileName,
+        lastUploadedFile: null,
+        expectedQuantity
+      };
+
+      await saveFullApplicationState(backupSessionId, currentState, 'Manual Save');
+      setSuccess('Session saved successfully!');
+    } catch (error) {
+      setError('Failed to save session');
+    }
+  };
 
   const handleFileUpload = async (file: File) => {
     setLoading(true);
@@ -327,6 +510,228 @@ export default function Home() {
     });
   };
 
+  // Ad-hoc plan functions
+  const handleAdHocProductLookup = () => {
+    if (!adHocPlan.currentProductId.trim() || !products.length) return;
+    
+    const product = products.find(p => p.product_id.toLowerCase() === adHocPlan.currentProductId.toLowerCase());
+    if (product) {
+      // Check if product already exists
+      const existingProduct = adHocPlan.products.find(p => p.productId.toLowerCase() === adHocPlan.currentProductId.toLowerCase());
+      if (existingProduct) {
+        setError('Product already added to the analysis.');
+        setTimeout(() => setError(null), 3000);
+        return;
+      }
+
+      // Check if we've reached the maximum number of products
+      if (adHocPlan.products.length >= adHocPlan.maxProducts) {
+        setError(`Maximum number of products (${adHocPlan.maxProducts}) reached.`);
+        setTimeout(() => setError(null), 3000);
+        return;
+      }
+
+      const newProduct = {
+        id: `product_${Date.now()}`,
+        productId: adHocPlan.currentProductId,
+        product,
+        targetPrice: 0,
+        targetMargin: 0,
+        inputMode: 'price' as 'price' | 'margin',
+        quantity: 1
+      };
+
+      setAdHocPlan(prev => ({
+        ...prev,
+        products: [...prev.products, newProduct],
+        currentProductId: ''
+      }));
+    } else {
+      setError('Product not found. Please check the Product ID.');
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
+  const updateAdHocProduct = (productId: string, field: 'targetPrice' | 'targetMargin' | 'quantity' | 'inputMode', value: number | string) => {
+    setAdHocPlan(prev => ({
+      ...prev,
+      products: prev.products.map(p => {
+        if (p.id === productId) {
+          const updatedProduct = { ...p, [field]: value };
+          
+          // If updating price, calculate margin
+          if (field === 'targetPrice' && typeof value === 'number' && p.product) {
+            const purchaseCost = p.product.purchase_cost || 0;
+            const newMargin = value > 0 ? Math.round(((value - purchaseCost) / value) * 100) : 0;
+            updatedProduct.targetMargin = newMargin;
+          }
+          
+          // If updating margin, calculate price
+          if (field === 'targetMargin' && typeof value === 'number' && p.product) {
+            const purchaseCost = p.product.purchase_cost || 0;
+            const newPrice = value > 0 ? Math.round(purchaseCost / (1 - value / 100)) : purchaseCost;
+            updatedProduct.targetPrice = newPrice;
+          }
+          
+          return updatedProduct;
+        }
+        return p;
+      })
+    }));
+  };
+
+  const removeAdHocProduct = (productId: string) => {
+    setAdHocPlan(prev => ({
+      ...prev,
+      products: prev.products.filter(p => p.id !== productId)
+    }));
+  };
+
+  const approveAdHocProduct = (productId: string) => {
+    const productData = adHocPlan.products.find(p => p.id === productId);
+    if (!productData || !productData.product) return;
+
+    const approvedProduct = {
+      id: `approved_${Date.now()}`,
+      productId: productData.productId,
+      product: productData.product,
+      targetPrice: productData.targetPrice,
+      targetMargin: productData.targetMargin,
+      quantity: productData.quantity,
+      approvedAt: new Date()
+    };
+
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: [...prev.approvedProducts, approvedProduct],
+      products: prev.products.filter(p => p.id !== productId)
+    }));
+  };
+
+  const removeApprovedProduct = (productId: string) => {
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: prev.approvedProducts.filter(p => p.id !== productId)
+    }));
+  };
+
+  const updateApprovedProductQuantity = (productId: string, quantity: number) => {
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: prev.approvedProducts.map(p => 
+        p.id === productId ? { ...p, quantity: Math.max(1, quantity) } : p
+      )
+    }));
+  };
+
+  const updateApprovedProductPrice = (productId: string, targetPrice: number) => {
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: prev.approvedProducts.map(p => {
+        if (p.id === productId) {
+          const purchaseCost = p.product.purchase_cost || 0;
+          const newMargin = targetPrice > 0 ? Math.round(((targetPrice - purchaseCost) / targetPrice) * 100) : 0;
+          return { ...p, targetPrice: Math.max(0, targetPrice), targetMargin: newMargin };
+        }
+        return p;
+      })
+    }));
+  };
+
+  const calculateAdHocMargins = (productData: { product: Product | null; targetPrice: number; quantity: number }) => {
+    if (!productData.product) return null;
+    const { product, targetPrice, quantity } = productData;
+    
+    // All prices already include VAT - no need to strip VAT
+    const purchaseCost = product.purchase_cost || 0; // Already includes VAT
+    const regularPrice = product.regular_price || 0; // Already includes VAT
+    const currentSalePrice = product.custom_sale_price || product.five_percent_sale_price || regularPrice; // Already includes VAT
+    
+    // Calculate current margins (all prices include VAT)
+    const currentLowestPrice = Math.min(regularPrice, currentSalePrice);
+    const currentMargin = currentLowestPrice - purchaseCost;
+    const currentMarginPercent = currentLowestPrice > 0 ? ((currentMargin / currentLowestPrice) * 100) : 0;
+    
+    // Calculate target margins (all prices include VAT)
+    const targetMargin = targetPrice - purchaseCost;
+    const targetMarginPercent = targetPrice > 0 ? ((targetMargin / targetPrice) * 100) : 0;
+    
+    // Calculate totals (all prices include VAT)
+    const totalSalesValue = targetPrice * quantity;
+    const totalMargin = targetMargin * quantity;
+    
+    return {
+      product,
+      purchaseCost,
+      regularPrice,
+      currentSalePrice,
+      currentLowestPrice,
+      currentMargin,
+      currentMarginPercent,
+      targetPrice,
+      targetPriceExVAT: targetPrice, // Same as target price since all prices include VAT
+      targetMargin,
+      targetMarginPercent,
+      quantity,
+      totalSalesValue,
+      totalSalesValueExVAT: targetPrice * quantity, // Same as total sales value since all prices include VAT
+      totalMargin,
+      vatAmount: 0 // No separate VAT calculation since all prices include VAT
+    };
+  };
+
+  const calculateAdHocTotals = () => {
+    let totalSalesValue = 0;
+    let totalSalesValueExVAT = 0;
+    let totalMargin = 0;
+    let totalVAT = 0;
+
+    adHocPlan.products.forEach(productData => {
+      if (productData.product) {
+        const calculations = calculateAdHocMargins(productData);
+        if (calculations) {
+          totalSalesValue += calculations.totalSalesValue;
+          totalSalesValueExVAT += calculations.totalSalesValueExVAT;
+          totalMargin += calculations.totalMargin;
+          totalVAT += calculations.vatAmount;
+        }
+      }
+    });
+
+    return {
+      totalSalesValue: Math.round(totalSalesValue),
+      totalSalesValueExVAT: Math.round(totalSalesValueExVAT),
+      totalMargin: Math.round(totalMargin),
+      totalVAT: Math.round(totalVAT),
+      productCount: adHocPlan.products.length
+    };
+  };
+
+  const calculateApprovedTotals = () => {
+    let totalSalesValue = 0;
+    let totalMargin = 0;
+    let totalPurchaseCost = 0;
+
+    adHocPlan.approvedProducts.forEach(approvedProduct => {
+      // All prices already include VAT - no need to strip VAT
+      const purchaseCost = approvedProduct.product.purchase_cost || 0; // Already includes VAT
+      const targetMargin = approvedProduct.targetPrice - purchaseCost; // Direct calculation since all prices include VAT
+      
+      totalSalesValue += approvedProduct.targetPrice * approvedProduct.quantity;
+      totalMargin += targetMargin * approvedProduct.quantity;
+      totalPurchaseCost += purchaseCost * approvedProduct.quantity;
+    });
+
+    return {
+      totalSalesValue: Math.round(totalSalesValue),
+      totalSalesValueExVAT: Math.round(totalSalesValue), // Same as total sales value since all prices include VAT
+      totalMargin: Math.round(totalMargin),
+      totalPurchaseCost: Math.round(totalPurchaseCost),
+      totalVAT: 0, // No separate VAT calculation since all prices include VAT
+      productCount: adHocPlan.approvedProducts.length
+    };
+  };
+
   const handleCategoryAlternativeConfirm = (replacements: Record<string, string>) => {
     const { pendingSelections, isMonthly } = categoryAlternativeModal;
     
@@ -463,10 +868,10 @@ export default function Home() {
     setLastUploadedFile(null);
     setReplacementModal({ isOpen: false, productToReplace: null, dayIndex: -1, productIndex: -1, weekIndex: -1, isMonthly: false, viewType: 'daily' });
     setPlanningMode('daily');
-          setWeeklyConfig({
-        numberOfWeeks: 1,
+    setWeeklyConfig({
+      numberOfWeeks: 1,
         weeks: [{ startDate: '', endDate: '', targetGPMargin: 0 }]
-      });
+    });
     
     setSuccess('Complete reset successful! Upload a new CSV file to start fresh.');
     setTimeout(() => setSuccess(null), 3000);
@@ -692,12 +1097,273 @@ export default function Home() {
     window.open(csvDataUri, '_blank');
   };
 
+  // Export functions for approved products
+  const prepareApprovedProductsExportData = () => {
+    return adHocPlan.approvedProducts.map((approvedProduct, index) => {
+      const purchaseCost = approvedProduct.product.purchase_cost || 0;
+      const targetMargin = approvedProduct.targetPrice - purchaseCost;
+      const totalValue = approvedProduct.targetPrice * approvedProduct.quantity;
+      const totalGP = targetMargin * approvedProduct.quantity;
+      const marginPercent = approvedProduct.targetPrice > 0 ? Math.round(((targetMargin) / approvedProduct.targetPrice) * 100) : 0;
+
+      return {
+        'Product Name': String(approvedProduct.product.product_name || ''),
+        'Brand': String(approvedProduct.product.brand || ''),
+        'Category': String(approvedProduct.product.category || ''),
+        'Product ID': String(approvedProduct.productId || ''),
+        'Supplier': String(approvedProduct.product.supplier_name || ''),
+        'Cost': Math.round(purchaseCost),
+        'Promo Price': Math.round(approvedProduct.targetPrice),
+        'Margin %': marginPercent,
+        'Quantity': approvedProduct.quantity,
+        'Total Value': Math.round(totalValue),
+        'Total GP': Math.round(totalGP),
+        'Approved Date': approvedProduct.approvedAt.toLocaleDateString()
+      };
+    });
+  };
+
+  const exportApprovedProductsToExcel = () => {
+    const data = prepareApprovedProductsExportData();
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Approved Products');
+    XLSX.writeFile(wb, 'approved-products.xlsx');
+  };
+
+  const exportApprovedProductsToCSV = () => {
+    const data = prepareApprovedProductsExportData();
+    exportToCSV(data, 'approved-products.csv');
+  };
+
+  const exportApprovedProductsToGoogleSheets = () => {
+    const data = prepareApprovedProductsExportData();
+    exportToGoogleSheets(data);
+  };
+
+  const printApprovedProducts = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const data = prepareApprovedProductsExportData();
+    const totals = calculateApprovedTotals();
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Approved Products Report</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 0.1in; /* Ultra-narrow margins */
+            }
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 9px; /* Smaller base font */
+              line-height: 1.1; /* Tighter line spacing */
+              margin: 0;
+              padding: 0;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 8px; /* Reduced margins */
+              border-bottom: 1px solid #333; /* Thinner border */
+              padding-bottom: 5px; /* Reduced padding */
+            }
+            .header h1 {
+              font-size: 12px; /* Smaller title */
+              margin: 2px 0; /* Reduced margins */
+            }
+            .header p {
+              font-size: 8px; /* Smaller date */
+              margin: 1px 0; /* Reduced margins */
+            }
+            .summary {
+              display: flex;
+              justify-content: space-around;
+              margin-bottom: 8px; /* Reduced margins */
+              padding: 4px; /* Reduced padding */
+              background-color: #f5f5f5;
+              border-radius: 3px;
+            }
+            .summary-item {
+              text-align: center;
+            }
+            .summary-label {
+              font-weight: bold;
+              display: block;
+              font-size: 8px; /* Smaller labels */
+            }
+            .summary-value {
+              font-size: 10px; /* Smaller values */
+              margin-top: 2px; /* Reduced margin */
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 5px; /* Reduced margin */
+              page-break-inside: avoid; /* Keep table on one page */
+            }
+            thead {
+              display: table-header-group;
+            }
+            tbody {
+              display: table-row-group;
+            }
+            tr {
+              page-break-inside: avoid;
+            }
+            th, td {
+              border: 1px solid #333;
+              padding: 2px; /* Minimal padding */
+              text-align: left;
+              vertical-align: top;
+              word-wrap: break-word;
+              font-size: 7px; /* Smaller table font */
+            }
+            th {
+              background-color: #f0f0f0;
+              font-weight: bold;
+              text-align: center;
+            }
+            .product-name {
+              max-width: 200px;
+              word-wrap: break-word;
+            }
+            .number {
+              text-align: right;
+            }
+            .positive {
+              color: #008000;
+            }
+            .negative {
+              color: #ff0000;
+            }
+            .footer {
+              margin-top: 5px; /* Reduced margin */
+              text-align: center;
+              font-size: 6px; /* Smaller footer font */
+              color: #666;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Approved Products Report</h1>
+            <p>Generated on ${new Date().toLocaleDateString()}</p>
+          </div>
+          
+          <div class="summary">
+            <div class="summary-item">
+              <span class="summary-label">Total Products</span>
+              <span class="summary-value">${totals.productCount}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total Purchase Value</span>
+              <span class="summary-value">R${totals.totalPurchaseCost}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total Sales Value</span>
+              <span class="summary-value">R${totals.totalSalesValue}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total GP</span>
+              <span class="summary-value ${totals.totalMargin >= 0 ? 'positive' : 'negative'}">R${totals.totalMargin}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">All Prices Include VAT</span>
+              <span class="summary-value">15%</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>Brand</th>
+                <th>Category</th>
+                <th>ID</th>
+                <th>Supplier</th>
+                <th>Cost</th>
+                <th>Promo Price</th>
+                <th>Margin %</th>
+                <th>Qty</th>
+                <th>Total Value</th>
+                <th>Total GP</th>
+                <th>Approved</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.map(row => `
+                <tr>
+                  <td class="product-name">${row['Product Name']}</td>
+                  <td>${row['Brand']}</td>
+                  <td>${row['Category']}</td>
+                  <td>${row['Product ID']}</td>
+                  <td>${row['Supplier']}</td>
+                  <td class="number">R${row['Cost']}</td>
+                  <td class="number">R${row['Promo Price']}</td>
+                  <td class="number ${row['Margin %'] >= 0 ? 'positive' : 'negative'}">${row['Margin %']}%</td>
+                  <td class="number">${row['Quantity']}</td>
+                  <td class="number">R${row['Total Value']}</td>
+                  <td class="number ${row['Total GP'] >= 0 ? 'positive' : 'negative'}">R${row['Total GP']}</td>
+                  <td>${row['Approved Date']}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          
+          <div class="summary" style="margin-top: 5px; page-break-inside: avoid;">
+            <div class="summary-item">
+              <span class="summary-label">Total Products</span>
+              <span class="summary-value">${totals.productCount}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total Purchase Value</span>
+              <span class="summary-value">R${totals.totalPurchaseCost}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total Sales Value</span>
+              <span class="summary-value">R${totals.totalSalesValue}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total GP</span>
+              <span class="summary-value ${totals.totalMargin >= 0 ? 'positive' : 'negative'}">R${totals.totalMargin}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">All Prices Include VAT</span>
+              <span class="summary-value">15%</span>
+            </div>
+          </div>
+          
+          <div class="footer">
+            <p>All prices include 15% VAT | Generated by Promotion Planner</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
   const prepareExportData = (plan: WeeklyPlan, viewMode: 'daily' | 'consolidated') => {
     if (viewMode === 'daily') {
       // For daily view, create separate sheets for each day
       const exportData: any[] = [];
       plan.days.forEach(day => {
         day.products.forEach(product => {
+          const purchaseCost = product.purchase_cost || 0;
+          const salePrice = product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0;
+          const gpRandValue = Math.round(salePrice - purchaseCost);
+          const gpPercentage = purchaseCost > 0 ? Math.round(((salePrice - purchaseCost) / salePrice) * 100) : 0;
+          const quantity = expectedQuantity;
+          const salesValue = Math.round(salePrice * quantity);
+          const totalGP = Math.round(gpRandValue * quantity);
+
           exportData.push({
             'Day': abbreviateDayName(day.dayName),
             'Date': day.date.toLocaleDateString(),
@@ -706,10 +1372,15 @@ export default function Home() {
             'Brand': String(product.brand || ''),
             'Supplier': String(product.supplier_name || ''),
             'Category': String(product.category || ''),
-            'Purchase Cost': Math.round(product.purchase_cost || 0),
+            'Purchase Cost': Math.round(purchaseCost),
             'Reg Price': Math.round(product.regular_price || 0),
-            '5% Sale Price': Math.round(product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0),
-            'Save': Math.round((product.regular_price || 0) - (product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0)),
+            '5% Sale Price': Math.round(salePrice),
+            'GP Rand Value': gpRandValue,
+            'GP %': gpPercentage,
+            'Quantity': quantity,
+            'Sales Value': salesValue,
+            'Total GP': totalGP,
+            'Save': Math.round((product.regular_price || 0) - salePrice),
             'Views': Number(product.views || 0),
             'Stock': product.stock_status === 'instock' ? 'In Stock' : 
                     product.stock_status === 'outofstock' ? 'Out of Stock' : 
@@ -733,22 +1404,37 @@ export default function Home() {
         });
       });
 
-      return Array.from(allProducts.values()).map(product => ({
-        'Product ID': String(product.product_id || ''),
-        'Name': String(product.product_name || ''),
-        'Brand': String(product.brand || ''),
-        'Supplier': String(product.supplier_name || ''),
-        'Category': String(product.category || ''),
-        'Purchase Cost': Math.round(product.purchase_cost || 0),
-        'Reg Price': Math.round(product.regular_price || 0),
-        '5% Sale Price': Math.round(product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0),
-        'Save': Math.round((product.regular_price || 0) - (product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0)),
-        'Views': Number(product.views || 0),
-        'Stock': product.stock_status === 'instock' ? 'In Stock' : 
-                product.stock_status === 'outofstock' ? 'Out of Stock' : 
-                String(product.stock_status || ''),
-        'Day': Array.from(product.featuredDays as Set<string>).map(abbreviateDayName).join(', ')
-      }));
+      return Array.from(allProducts.values()).map(product => {
+        const purchaseCost = product.purchase_cost || 0;
+        const salePrice = product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0;
+        const gpRandValue = Math.round(salePrice - purchaseCost);
+        const gpPercentage = purchaseCost > 0 ? Math.round(((salePrice - purchaseCost) / salePrice) * 100) : 0;
+        const quantity = expectedQuantity;
+        const salesValue = Math.round(salePrice * quantity);
+        const totalGP = Math.round(gpRandValue * quantity);
+
+        return {
+          'Product ID': String(product.product_id || ''),
+          'Name': String(product.product_name || ''),
+          'Brand': String(product.brand || ''),
+          'Supplier': String(product.supplier_name || ''),
+          'Category': String(product.category || ''),
+          'Purchase Cost': Math.round(purchaseCost),
+          'Reg Price': Math.round(product.regular_price || 0),
+          '5% Sale Price': Math.round(salePrice),
+          'GP Rand Value': gpRandValue,
+          'GP %': gpPercentage,
+          'Quantity': quantity,
+          'Sales Value': salesValue,
+          'Total GP': totalGP,
+          'Save': Math.round((product.regular_price || 0) - salePrice),
+          'Views': Number(product.views || 0),
+          'Stock': product.stock_status === 'instock' ? 'In Stock' : 
+                  product.stock_status === 'outofstock' ? 'Out of Stock' : 
+                  String(product.stock_status || ''),
+          'Day': Array.from(product.featuredDays as Set<string>).map(abbreviateDayName).join(', ')
+        };
+      });
     }
   };
 
@@ -757,6 +1443,14 @@ export default function Home() {
     plan.weeks.forEach(week => {
       week.days.forEach(day => {
         day.products.forEach(product => {
+          const purchaseCost = product.purchase_cost || 0;
+          const salePrice = product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0;
+          const gpRandValue = Math.round(salePrice - purchaseCost);
+          const gpPercentage = purchaseCost > 0 ? Math.round(((salePrice - purchaseCost) / salePrice) * 100) : 0;
+          const quantity = expectedQuantity;
+          const salesValue = Math.round(salePrice * quantity);
+          const totalGP = Math.round(gpRandValue * quantity);
+
           exportData.push({
             'Week': week.weekNumber,
             'Day': abbreviateDayName(day.dayName),
@@ -766,10 +1460,15 @@ export default function Home() {
             'Brand': String(product.brand || ''),
             'Supplier': String(product.supplier_name || ''),
             'Category': String(product.category || ''),
-            'Purchase Cost': Math.round(product.purchase_cost || 0),
+            'Purchase Cost': Math.round(purchaseCost),
             'Reg Price': Math.round(product.regular_price || 0),
-            '5% Sale Price': Math.round(product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0),
-            'Save': Math.round((product.regular_price || 0) - (product.custom_sale_price || product.five_percent_sale_price || product.regular_price || 0)),
+            '5% Sale Price': Math.round(salePrice),
+            'GP Rand Value': gpRandValue,
+            'GP %': gpPercentage,
+            'Quantity': quantity,
+            'Sales Value': salesValue,
+            'Total GP': totalGP,
+            'Save': Math.round((product.regular_price || 0) - salePrice),
             'Views': Number(product.views || 0),
             'Stock': product.stock_status === 'instock' ? 'In Stock' : 
                     product.stock_status === 'outofstock' ? 'Out of Stock' : 
@@ -793,6 +1492,77 @@ export default function Home() {
             <p className="text-lg text-light-grey">
               developed by Michael Bruchhausen
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Backup System Controls */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <h3 className="text-lg font-semibold text-charcoal">Backup System</h3>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={autoSaveEnabled}
+                    onChange={(e) => setAutoSaveEnabled(e.target.checked)}
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Auto-save (30s)
+                </label>
+                {lastAutoSave && (
+                  <span className="text-xs text-gray-500">
+                    Last saved: {lastAutoSave.toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <select
+                value={backupSessionId || ''}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    loadBackupSession(e.target.value);
+                  }
+                }}
+                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:ring-primary focus:border-primary"
+                disabled={loading}
+              >
+                <option value="">Select Session</option>
+                {availableSessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.session_name} ({new Date(session.updated_at).toLocaleDateString()})
+                  </option>
+                ))}
+              </select>
+              
+              <button
+                onClick={createNewBackupSession}
+                className="px-3 py-1 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 focus:ring-2 focus:ring-green-500"
+                disabled={loading}
+              >
+                New Session
+              </button>
+              
+              <button
+                onClick={saveCurrentSession}
+                className="px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 focus:ring-2 focus:ring-blue-500"
+                disabled={loading || !backupSessionId}
+              >
+                Save Now
+              </button>
+              
+              <button
+                onClick={() => setIsBackupModalOpen(true)}
+                className="px-3 py-1 bg-gray-600 text-white rounded-md text-sm hover:bg-gray-700 focus:ring-2 focus:ring-gray-500"
+                disabled={loading}
+              >
+                Manage
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1102,27 +1872,27 @@ export default function Home() {
           <div className="bg-white rounded-lg shadow-md p-6 mb-8">
             <h3 className="text-lg font-semibold text-charcoal mb-4">Weekly Planning Configuration</h3>
             
-                      {/* Number of Weeks Selection */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              How many weeks do you want to plan for?
-            </label>
-            <select
-              value={weeklyConfig.numberOfWeeks}
-              onChange={(e) => handleNumberOfWeeksChange(parseInt(e.target.value))}
-              disabled={loading}
-              className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
-                <option key={num} value={num}>
-                  {num} {num === 1 ? 'Week' : 'Weeks'}
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* Number of Weeks Selection */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                How many weeks do you want to plan for?
+              </label>
+              <select
+                value={weeklyConfig.numberOfWeeks}
+                onChange={(e) => handleNumberOfWeeksChange(parseInt(e.target.value))}
+                disabled={loading}
+                className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
+                  <option key={num} value={num}>
+                    {num} {num === 1 ? 'Week' : 'Weeks'}
+                  </option>
+                ))}
+              </select>
+            </div>
 
           {/* Category and Product Configuration */}
-          <div className="mb-6">
+            <div className="mb-6">
             <h4 className="text-md font-medium text-charcoal mb-4">Configure Categories and Products</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1166,6 +1936,27 @@ export default function Home() {
                 {weeklyConfig.numberOfWeeks > 1 && (
                   <span> • <strong>Total for {weeklyConfig.numberOfWeeks} weeks:</strong> {weeklyCategoryConfig.numberOfCategories * weeklyCategoryConfig.productsPerCategory * 7 * weeklyConfig.numberOfWeeks} products</span>
                 )}
+              </p>
+            </div>
+          </div>
+
+          {/* Expected Sales Quantity Configuration */}
+          <div className="mb-6">
+            <h4 className="text-md font-medium text-charcoal mb-4">Expected Sales Quantity</h4>
+            <div className="max-w-xs">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Expected Quantity to Sell per Product
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={expectedQuantity}
+                onChange={(e) => setExpectedQuantity(parseInt(e.target.value) || 1)}
+                disabled={loading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                This will be used to calculate total sales value and total GP in exports
               </p>
             </div>
           </div>
@@ -1370,11 +2161,11 @@ export default function Home() {
                 <div className="ml-3">
                   <h3 className="text-sm font-medium text-blue-800">Flexible Weekly Planning</h3>
                   <div className="mt-1 text-sm text-blue-700">
-                                      <p>• Choose any number of weeks (1-8 weeks)</p>
+                    <p>• Choose any number of weeks (1-8 weeks)</p>
                   <p>• Configure number of categories (1-10) and products per category (1-30)</p>
-                  <p>• Set custom start and end dates for each week period</p>
+                    <p>• Set custom start and end dates for each week period</p>
                   <p>• Set individual target GP margins for each week (including negative margins for loss-leader strategies)</p>
-                  <p>• Perfect for irregular periods like 8-day weeks or custom promotional periods</p>
+                    <p>• Perfect for irregular periods like 8-day weeks or custom promotional periods</p>
                   </div>
                 </div>
               </div>
@@ -1599,11 +2390,11 @@ export default function Home() {
         {/* Monthly Promotion Table - Only show if monthly plan is generated */}
         {monthlyPlan && (
           <div>
-            <MonthlyPromotionTable
-              monthlyPlan={monthlyPlan}
-              onPriceChange={handleMonthlyPriceChange}
-              onReplaceProduct={handleReplaceMonthlyProduct}
-            />
+          <MonthlyPromotionTable
+            monthlyPlan={monthlyPlan}
+            onPriceChange={handleMonthlyPriceChange}
+            onReplaceProduct={handleReplaceMonthlyProduct}
+          />
             
             {/* Monthly Plan Export Options */}
             <div className="mt-4 bg-white rounded-lg shadow-lg p-6">
@@ -1642,6 +2433,460 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Ad-Hoc Plan Section */}
+        <div className="mb-6">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-xl font-semibold text-charcoal">Ad-Hoc Product Analysis</h3>
+                <p className="text-sm text-gray-600">
+                  Analyze multiple products with VAT calculations ({adHocPlan.products.length}/{adHocPlan.maxProducts} products)
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-sm text-gray-600">Max Products:</div>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={adHocPlan.maxProducts}
+                  onChange={(e) => setAdHocPlan(prev => ({ ...prev, maxProducts: parseInt(e.target.value) || 30 }))}
+                  className="w-20 px-2 py-1 border border-gray-300 rounded text-center"
+                />
+              </div>
+            </div>
+            
+            {/* Add Product Section */}
+            <div className="mb-6">
+              <div className="max-w-md">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Product ID
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={adHocPlan.currentProductId}
+                    onChange={(e) => setAdHocPlan(prev => ({ ...prev, currentProductId: e.target.value }))}
+                    placeholder="Enter Product ID"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                  />
+                  <button
+                    onClick={handleAdHocProductLookup}
+                    disabled={!adHocPlan.currentProductId.trim() || !products.length || adHocPlan.products.length >= adHocPlan.maxProducts}
+                    className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-pale-teal disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Add Product
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  All prices include 15% VAT (South African standard rate)
+                </p>
+              </div>
+            </div>
+
+            {/* Products List */}
+            {adHocPlan.products.length > 0 && (
+              <div className="space-y-4">
+                {/* Total Summary */}
+                <div className="bg-purple-50 rounded-lg p-4">
+                  <h4 className="text-lg font-medium text-charcoal mb-3">Total Summary</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-600">Total Products:</span>
+                      <p className="text-lg font-semibold text-purple-600">{calculateAdHocTotals().productCount}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total Sales Value:</span>
+                      <p className="text-lg font-semibold text-blue-600">R{calculateAdHocTotals().totalSalesValue}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total GP:</span>
+                      <p className={`text-lg font-semibold ${calculateAdHocTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        R{calculateAdHocTotals().totalMargin}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total VAT:</span>
+                      <p className="text-lg font-semibold text-orange-600">R{calculateAdHocTotals().totalVAT}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Individual Products */}
+                {adHocPlan.products.map((productData, index) => {
+                  if (!productData.product) return null;
+                  
+                  const calculations = calculateAdHocMargins(productData);
+                  if (!calculations) return null;
+
+                  return (
+                    <div key={productData.id} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <h4 className="text-lg font-medium text-charcoal">
+                          Product {index + 1}: {productData.product.product_name}
+                        </h4>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => approveAdHocProduct(productData.id)}
+                            className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => removeAdHocProduct(productData.id)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Product Information */}
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <h5 className="font-medium text-charcoal mb-2">Product Info</h5>
+                          <div className="text-sm space-y-1">
+                            <p><span className="font-medium">ID:</span> {productData.productId}</p>
+                            <p><span className="font-medium">Supplier:</span> {productData.product.supplier_name}</p>
+                            <p><span className="font-medium">Brand:</span> {productData.product.brand}</p>
+                            <p><span className="font-medium">Category:</span> {productData.product.category}</p>
+                          </div>
+                        </div>
+
+                        {/* Current Pricing */}
+                        <div className="bg-blue-50 rounded-lg p-3">
+                          <h5 className="font-medium text-charcoal mb-2">Current Pricing</h5>
+                          <div className="text-sm space-y-1">
+                            <p><span className="font-medium">Purchase Cost:</span> R{Math.round(calculations.purchaseCost)}</p>
+                            <p><span className="font-medium">Regular Price:</span> R{Math.round(calculations.regularPrice)}</p>
+                            <p><span className="font-medium">Current Sale:</span> R{Math.round(calculations.currentSalePrice)}</p>
+                            <p><span className="font-medium">Current Margin:</span> R{Math.round(calculations.currentMargin)} ({Math.round(calculations.currentMarginPercent)}%)</p>
+                            <p><span className="font-medium">Page Views:</span> {productData.product.views || 0}</p>
+                            <p><span className="font-medium">Stock Status:</span> 
+                              <span className={`ml-1 px-2 py-1 rounded text-xs font-medium ${
+                                productData.product.stock_status === 'instock' 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : productData.product.stock_status === 'outofstock'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {productData.product.stock_status === 'instock' ? 'In Stock' :
+                                 productData.product.stock_status === 'outofstock' ? 'Out of Stock' :
+                                 productData.product.stock_status || 'Unknown'}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Target Pricing Inputs */}
+                      <div className="mt-4 bg-green-50 rounded-lg p-3">
+                        <div className="flex justify-between items-center mb-3">
+                          <h5 className="font-medium text-charcoal">Target Pricing</h5>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => updateAdHocProduct(productData.id, 'inputMode', 'price')}
+                              className={`px-3 py-1 text-xs rounded ${
+                                productData.inputMode === 'price' 
+                                  ? 'bg-primary text-white' 
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              Set Price
+                            </button>
+                            <button
+                              onClick={() => updateAdHocProduct(productData.id, 'inputMode', 'margin')}
+                              className={`px-3 py-1 text-xs rounded ${
+                                productData.inputMode === 'margin' 
+                                  ? 'bg-primary text-white' 
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              Set Margin
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          {productData.inputMode === 'price' ? (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Target Price (Incl. VAT)
+                              </label>
+                                                          <input
+                              type="number"
+                              step="1"
+                              value={productData.targetPrice || ''}
+                              onChange={(e) => updateAdHocProduct(productData.id, 'targetPrice', Math.round(parseFloat(e.target.value) || 0))}
+                              placeholder="Enter target price"
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                            />
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Target Margin (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="1"
+                                value={productData.targetMargin || ''}
+                                onChange={(e) => updateAdHocProduct(productData.id, 'targetMargin', Math.round(parseFloat(e.target.value) || 0))}
+                                placeholder="Enter target margin %"
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                              />
+                            </div>
+                          )}
+                          
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Quantity
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={productData.quantity}
+                              onChange={(e) => updateAdHocProduct(productData.id, 'quantity', parseInt(e.target.value) || 1)}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Target Price (Incl. VAT)
+                            </label>
+                            <div className="px-2 py-1 bg-gray-100 rounded text-sm text-charcoal">
+                              {productData.targetPrice > 0 ? `R${Math.round(productData.targetPrice)}` : 'Enter price first'}
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              {productData.inputMode === 'price' ? 'Calculated Margin (%)' : 'Calculated Price (Incl. VAT)'}
+                            </label>
+                            <div className="px-2 py-1 bg-gray-100 rounded text-sm text-charcoal">
+                              {productData.inputMode === 'price' 
+                                ? (productData.targetPrice > 0 ? `${Math.round(calculations.targetMarginPercent)}%` : 'Enter price first')
+                                : (productData.targetMargin > 0 ? `R${Math.round(productData.targetPrice)}` : 'Enter margin first')
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Margin Analysis Results */}
+                      {productData.targetPrice > 0 && (
+                        <div className="mt-4 bg-yellow-50 rounded-lg p-3">
+                          <h5 className="font-medium text-charcoal mb-3">Margin Analysis</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <span className="font-medium text-gray-600">Target Margin (R):</span>
+                              <p className={`font-semibold ${calculations.targetMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                R{Math.round(calculations.targetMargin)}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-600">Target Margin (%):</span>
+                              <p className={`font-semibold ${calculations.targetMarginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {Math.round(calculations.targetMarginPercent)}%
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-600">Total Sales Value:</span>
+                              <p className="font-semibold text-blue-600">
+                                R{Math.round(calculations.totalSalesValue)}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-600">Total GP:</span>
+                              <p className={`font-semibold ${calculations.totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                R{Math.round(calculations.totalMargin)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-600">
+                            <p>All prices include 15% VAT | Sales Value: R{Math.round(calculations.totalSalesValue)}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {productData.targetPrice === 0 && (
+                        <div className="mt-4 bg-gray-50 rounded-lg p-3">
+                          <p className="text-sm text-gray-600 text-center">
+                            Enter a target price or margin to see margin analysis
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Approved Products Table */}
+            {adHocPlan.approvedProducts.length > 0 && (
+              <div className="mt-8">
+                <div className="bg-white rounded-lg shadow-lg p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-semibold text-charcoal">Approved Products</h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={printApprovedProducts}
+                        className="px-3 py-2 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
+                      >
+                        🖨️ Print PDF
+                      </button>
+                      <button
+                        onClick={exportApprovedProductsToExcel}
+                        className="px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
+                      >
+                        📈 Export Excel
+                      </button>
+                      <button
+                        onClick={exportApprovedProductsToCSV}
+                        className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        📄 Export CSV
+                      </button>
+                      <button
+                        onClick={exportApprovedProductsToGoogleSheets}
+                        className="px-3 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors"
+                      >
+                        📋 Open in Google Sheets
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Approved Products Summary */}
+                  <div className="bg-green-50 rounded-lg p-4 mb-6">
+                    <h4 className="text-lg font-medium text-charcoal mb-3">Approved Products Summary</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-600">Approved Products:</span>
+                        <p className="text-lg font-semibold text-green-600">{calculateApprovedTotals().productCount}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total Purchase Value:</span>
+                        <p className="text-lg font-semibold text-purple-600">R{calculateApprovedTotals().totalPurchaseCost}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total Sales Value:</span>
+                        <p className="text-lg font-semibold text-blue-600">R{calculateApprovedTotals().totalSalesValue}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total GP:</span>
+                        <p className={`text-lg font-semibold ${calculateApprovedTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          R{calculateApprovedTotals().totalMargin}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">All Prices Include VAT:</span>
+                        <p className="text-lg font-semibold text-orange-600">15%</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Approved Products Table */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promo Price</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty (Editable)</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Value</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total GP</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approved</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {adHocPlan.approvedProducts.map((approvedProduct, index) => {
+                          // All prices already include VAT - no need to strip VAT
+                          const purchaseCost = approvedProduct.product.purchase_cost || 0; // Already includes VAT
+                          const targetMargin = approvedProduct.targetPrice - purchaseCost; // Direct calculation since all prices include VAT
+                          const totalValue = approvedProduct.targetPrice * approvedProduct.quantity;
+                          const totalGP = targetMargin * approvedProduct.quantity;
+                          const marginPercent = approvedProduct.targetPrice > 0 ? Math.round(((targetMargin) / approvedProduct.targetPrice) * 100) : 0;
+
+                          return (
+                            <tr key={approvedProduct.id} className="hover:bg-gray-50">
+                              <td className="px-3 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-charcoal max-w-xs truncate">
+                                  {approvedProduct.product.product_name}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {approvedProduct.product.brand} - {approvedProduct.product.category}
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {approvedProduct.productId}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {approvedProduct.product.supplier_name}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                                R{Math.round(purchaseCost)}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={approvedProduct.targetPrice || ''}
+                                  onChange={(e) => updateApprovedProductPrice(approvedProduct.id, Math.round(parseFloat(e.target.value) || 0))}
+                                  className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                                />
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <span className={`font-medium ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {marginPercent}%
+                                </span>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={approvedProduct.quantity}
+                                  onChange={(e) => updateApprovedProductQuantity(approvedProduct.id, parseInt(e.target.value) || 1)}
+                                  className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                                />
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-blue-600 font-medium">
+                                R{Math.round(totalValue)}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <span className={`font-medium ${totalGP >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  R{Math.round(totalGP)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {approvedProduct.approvedAt.toLocaleDateString()}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <button
+                                  onClick={() => removeApprovedProduct(approvedProduct.id)}
+                                  className="text-red-600 hover:text-red-800"
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Plan View Selection */}
         {weeklyPlan && (
@@ -1715,11 +2960,11 @@ export default function Home() {
         {/* Promotion Table - Only show if weekly plan is generated and daily view is selected */}
         {weeklyPlan && planViewMode === 'daily' && (
           <div>
-            <PromotionTable
-              weeklyPlan={weeklyPlan}
-              onPriceChange={handleWeeklyPriceChange}
-              onReplaceProduct={handleReplaceWeeklyProduct}
-            />
+          <PromotionTable
+            weeklyPlan={weeklyPlan}
+            onPriceChange={handleWeeklyPriceChange}
+            onReplaceProduct={handleReplaceWeeklyProduct}
+          />
             
             {/* Action buttons for weekly plan */}
             <div className="mt-4 flex gap-3">
@@ -1923,6 +3168,96 @@ export default function Home() {
             }}
             onClose={() => setIsAddProductOpen(false)}
           />
+        )}
+
+        {/* Backup Management Modal */}
+        {isBackupModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-charcoal">Backup Session Management</h2>
+                <button
+                  onClick={() => setIsBackupModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-medium text-charcoal mb-2">Available Sessions</h3>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {availableSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                          backupSessionId === session.id
+                            ? 'border-primary bg-primary bg-opacity-10'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        onClick={() => {
+                          setBackupSessionId(session.id);
+                          setActiveSession(session.id);
+                        }}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-medium text-charcoal">{session.session_name}</h4>
+                            <p className="text-sm text-gray-600">{session.description}</p>
+                            <p className="text-xs text-gray-500">
+                              Created: {new Date(session.created_at).toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Updated: {new Date(session.updated_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                loadBackupSession(session.id);
+                              }}
+                              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                              disabled={loading}
+                            >
+                              Load
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+                                  // TODO: Implement delete session
+                                  console.log('Delete session:', session.id);
+                                }
+                              }}
+                              className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                              disabled={loading}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {availableSessions.length === 0 && (
+                      <p className="text-gray-500 text-center py-4">No backup sessions found</p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="border-t pt-4">
+                  <button
+                    onClick={createNewBackupSession}
+                    className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500"
+                    disabled={loading}
+                  >
+                    Create New Session
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
