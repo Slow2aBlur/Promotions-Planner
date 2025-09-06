@@ -60,7 +60,7 @@ export default function CategoryAlternativeModal({
             ⚠️ Categories Have No Available Products
           </h2>
           <p className="text-sm text-gray-600 mt-1">
-            Some selected categories don't have any products that meet the criteria (published, R199+). 
+            Some selected categories don&apos;t have any products that meet the criteria (published, R199+). 
             Please choose alternative categories.
           </p>
         </div>
@@ -71,7 +71,7 @@ export default function CategoryAlternativeModal({
             <div key={emptyCategory} className="mb-6 p-4 border border-red-200 rounded-lg bg-red-50">
               <div className="mb-3">
                 <h3 className="font-medium text-red-700">
-                  "{emptyCategory}" has no available products
+                  &quot;{emptyCategory}&quot; has no available products
                 </h3>
                 <p className="text-sm text-red-600">
                   Choose an alternative category below:
@@ -145,7 +145,7 @@ export default function CategoryAlternativeModal({
             <div key={insufficientCategory} className="mb-6 p-4 border border-orange-200 rounded-lg bg-orange-50">
               <div className="mb-3">
                 <h3 className="font-medium text-orange-700">
-                  "{insufficientCategory}" has insufficient products
+                  &quot;{insufficientCategory}&quot; has insufficient products
                 </h3>
                 <p className="text-sm text-orange-600">
                   Available: {availableByCategory[insufficientCategory] || 0} products, but you need more for multiple selections. Choose an alternative:

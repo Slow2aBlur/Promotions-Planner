@@ -8,7 +8,7 @@ import PromotionTable from '@/components/PromotionTable';
 import MonthlyPromotionTable from '@/components/MonthlyPromotionTable';
 import ProductReplacementModal from '@/components/ProductReplacementModal';
 import CategoryAlternativeModal from '@/components/CategoryAlternativeModal';
-import { processProductCSV, generateDailyPromotionPlan, generateWeeklyPromotionPlan, generateFlexibleWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, replaceProductInPlan, calculateGPPercentage, filterEligibleProducts, getStockStatusSummary, validateDailyCategoryAvailability, validateWeeklyCategoryAvailability, getAlternativeCategories } from '@/lib/dataProcessor';
+import { processProductCSV, generateDailyPromotionPlan, generateFlexibleWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, filterEligibleProducts, getStockStatusSummary } from '@/lib/dataProcessor';
 import { saveWeeklyPlan } from '@/lib/supabaseActions';
 import { 
   createNewSession, 
@@ -20,9 +20,7 @@ import {
   BackupSession,
   FullApplicationState
 } from '@/lib/backupActions';
-import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeekConfig, WeeklyConfiguration } from '@/lib/types';
-import DailyCategorySelector from '@/components/DailyCategorySelector';
-import WeeklyCategorySelector from '@/components/WeeklyCategorySelector';
+import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration } from '@/lib/types';
 import ProductSearchModal from '@/components/ProductSearchModal';
 
 export default function Home() {
@@ -30,7 +28,6 @@ export default function Home() {
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
   const [monthlyPlan, setMonthlyPlan] = useState<MonthlyPlan | null>(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [uniqueCategories, setUniqueCategories] = useState<string[]>([]);
@@ -104,8 +101,6 @@ export default function Home() {
     maxProducts: 30
   });
 
-  // VAT rate constant (15% for South Africa)
-  const VAT_RATE = 0.15;
 
   // Backup system state
   const [backupSessionId, setBackupSessionId] = useState<string | null>(null);
@@ -179,7 +174,7 @@ export default function Home() {
     }, 30000); // Auto-save every 30 seconds
 
     return () => clearInterval(autoSaveInterval);
-  }, [autoSaveEnabled, backupSessionId, products, dailyPlan, weeklyPlan, monthlyPlan, adHocPlan]);
+  }, [autoSaveEnabled, backupSessionId, products, dailyPlan, weeklyPlan, monthlyPlan, adHocPlan, dailySelections, expectedQuantity, planningMode, uniqueCategories, uploadedFileName, weeklyCategoryConfig, weeklyConfig, weeklySelections]);
 
   // Load sessions on component mount
   useEffect(() => {
@@ -196,8 +191,8 @@ export default function Home() {
       if (activeSession) {
         setBackupSessionId(activeSession.id);
       }
-    } catch (error) {
-      console.warn('Failed to load sessions:', error);
+    } catch (_error) {
+      console.warn('Failed to load sessions:', _error);
     }
   };
 
@@ -210,7 +205,7 @@ export default function Home() {
       setBackupSessionId(sessionId);
       await loadAvailableSessions();
       setSuccess('New backup session created!');
-    } catch (error) {
+    } catch (_error) {
       setError('Failed to create backup session');
     }
   };
@@ -237,7 +232,7 @@ export default function Home() {
       setBackupSessionId(sessionId);
       
       setSuccess('Session restored successfully!');
-    } catch (error) {
+    } catch (_error) {
       setError('Failed to restore session');
     } finally {
       setLoading(false);
@@ -384,22 +379,6 @@ export default function Home() {
     }
   };
 
-  const handleSavePlan = async () => {
-    if (!weeklyPlan) return;
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      await saveWeeklyPlan(weeklyPlan);
-      setSuccess('Weekly promotion plan saved to Supabase successfully!');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred while saving the plan');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleReplaceWeeklyProduct = (dayIndex: number, productIndex: number) => {
     if (!weeklyPlan || !products.length) return;
@@ -947,8 +926,8 @@ export default function Home() {
     // Add product to the first day of the week
     const updated = {
       ...weeklyPlan,
-      days: weeklyPlan.days.map((day, index) => {
-        if (index === 0) {
+      days: weeklyPlan.days.map((day, _index) => {
+        if (_index === 0) {
           return {
             ...day,
             products: [...day.products, product]
@@ -963,10 +942,10 @@ export default function Home() {
   };
 
   const handleNumberOfWeeksChange = (numberOfWeeks: number) => {
-    const newWeeks = Array.from({ length: numberOfWeeks }, (_, index) => ({
-      startDate: weeklyConfig.weeks[index]?.startDate || '',
-      endDate: weeklyConfig.weeks[index]?.endDate || '',
-      targetGPMargin: weeklyConfig.weeks[index]?.targetGPMargin || 0
+    const newWeeks = Array.from({ length: numberOfWeeks }, (_, _index) => ({
+      startDate: weeklyConfig.weeks[_index]?.startDate || '',
+      endDate: weeklyConfig.weeks[_index]?.endDate || '',
+      targetGPMargin: weeklyConfig.weeks[_index]?.targetGPMargin || 0
     }));
     setWeeklyConfig({
       numberOfWeeks,
@@ -1030,7 +1009,7 @@ export default function Home() {
   };
 
   // Export functions
-  const exportToCSV = (data: any[], filename: string) => {
+  const exportToCSV = (data: Record<string, unknown>[], filename: string) => {
     if (data.length === 0) return;
     
     // Get headers from the first row
@@ -1062,14 +1041,14 @@ export default function Home() {
     document.body.removeChild(link);
   };
 
-  const exportToExcel = (data: any[], filename: string) => {
+  const exportToExcel = (data: Record<string, unknown>[], filename: string) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Promotion Plan');
     XLSX.writeFile(workbook, filename);
   };
 
-  const exportToGoogleSheets = (data: any[]) => {
+  const exportToGoogleSheets = (data: Record<string, unknown>[]) => {
     if (data.length === 0) return;
     
     // Get headers from the first row
@@ -1099,7 +1078,7 @@ export default function Home() {
 
   // Export functions for approved products
   const prepareApprovedProductsExportData = () => {
-    return adHocPlan.approvedProducts.map((approvedProduct, index) => {
+    return adHocPlan.approvedProducts.map((approvedProduct, _index) => {
       const purchaseCost = approvedProduct.product.purchase_cost || 0;
       const targetMargin = approvedProduct.targetPrice - purchaseCost;
       const totalValue = approvedProduct.targetPrice * approvedProduct.quantity;
@@ -1353,7 +1332,7 @@ export default function Home() {
   const prepareExportData = (plan: WeeklyPlan, viewMode: 'daily' | 'consolidated') => {
     if (viewMode === 'daily') {
       // For daily view, create separate sheets for each day
-      const exportData: any[] = [];
+      const exportData: Record<string, unknown>[] = [];
       plan.days.forEach(day => {
         day.products.forEach(product => {
           const purchaseCost = product.purchase_cost || 0;
@@ -2538,13 +2517,13 @@ export default function Home() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-600 mt-2">
-                      💡 These products are being analyzed. Click "Approve" to add them to your approved products table below.
+                      💡 These products are being analyzed. Click &quot;Approve&quot; to add them to your approved products table below.
                     </p>
                   </div>
                 )}
 
                 {/* Individual Products */}
-                {adHocPlan.products.map((productData, index) => {
+                {adHocPlan.products.map((productData, _index) => {
                   if (!productData.product) return null;
                   
                   const calculations = calculateAdHocMargins(productData);
@@ -2554,7 +2533,7 @@ export default function Home() {
                     <div key={productData.id} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex justify-between items-start mb-3">
                         <h4 className="text-lg font-medium text-charcoal">
-                          Product {index + 1}: {productData.product.product_name}
+                          Product {_index + 1}: {productData.product.product_name}
                         </h4>
                         <div className="flex gap-2">
                           <button

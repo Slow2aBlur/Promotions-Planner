@@ -1,4 +1,8 @@
 import { supabase } from './supabaseClient';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+// Type assertion for supabase client
+const supabaseClient = supabase as SupabaseClient;
 import { Product, DayPlan, WeeklyPlan, MonthlyPlan } from './types';
 
 // Types for backup data
@@ -62,7 +66,7 @@ export interface FullApplicationState {
 
 // 1. SESSION MANAGEMENT
 export async function createNewSession(sessionName: string, description?: string): Promise<string> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('user_sessions')
     .insert({
       session_name: sessionName,
@@ -79,7 +83,7 @@ export async function createNewSession(sessionName: string, description?: string
 }
 
 export async function getActiveSessions(): Promise<BackupSession[]> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('user_sessions')
     .select('*')
     .order('updated_at', { ascending: false });
@@ -93,13 +97,13 @@ export async function getActiveSessions(): Promise<BackupSession[]> {
 
 export async function setActiveSession(sessionId: string): Promise<void> {
   // Deactivate all sessions
-  await supabase
+  await supabaseClient
     .from('user_sessions')
     .update({ is_active: false })
     .neq('id', sessionId);
 
   // Activate the selected session
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('user_sessions')
     .update({ is_active: true, updated_at: new Date().toISOString() })
     .eq('id', sessionId);
@@ -154,7 +158,7 @@ export async function saveFullApplicationState(
     });
 
     // Update session timestamp
-    await supabase
+    await supabaseClient
       .from('user_sessions')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', sessionId);
@@ -166,7 +170,7 @@ export async function saveFullApplicationState(
 
 // 3. INDIVIDUAL DATA SAVERS
 export async function saveProducts(sessionId: string, products: Product[]): Promise<void> {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('products')
     .upsert(
       products.map(product => ({
@@ -195,7 +199,7 @@ export async function saveProducts(sessionId: string, products: Product[]): Prom
 }
 
 export async function saveDailyPlan(sessionId: string, plan: DayPlan, planName: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('daily_plans')
     .upsert({
       session_id: sessionId,
@@ -212,7 +216,7 @@ export async function saveDailyPlan(sessionId: string, plan: DayPlan, planName: 
 }
 
 export async function saveWeeklyPlan(sessionId: string, plan: WeeklyPlan, planName: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('weekly_plans')
     .upsert({
       session_id: sessionId,
@@ -231,7 +235,7 @@ export async function saveWeeklyPlan(sessionId: string, plan: WeeklyPlan, planNa
 }
 
 export async function saveMonthlyPlan(sessionId: string, plan: MonthlyPlan, planName: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('monthly_plans')
     .upsert({
       session_id: sessionId,
@@ -247,8 +251,8 @@ export async function saveMonthlyPlan(sessionId: string, plan: MonthlyPlan, plan
   }
 }
 
-export async function saveAdHocPlan(sessionId: string, adHocPlan: any, planName: string): Promise<void> {
-  const { error } = await supabase
+export async function saveAdHocPlan(sessionId: string, adHocPlan: FullApplicationState['adHocPlan'], planName: string): Promise<void> {
+  const { error } = await supabaseClient
     .from('adhoc_plans')
     .upsert({
       session_id: sessionId,
@@ -272,7 +276,7 @@ export async function saveAppSettings(sessionId: string, settings: Record<string
     setting_value: value
   }));
 
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('app_settings')
     .upsert(settingsArray, { onConflict: 'session_id,setting_key' });
 
@@ -285,7 +289,7 @@ export async function saveAppSettings(sessionId: string, settings: Record<string
 export async function loadFullApplicationState(sessionId: string): Promise<FullApplicationState> {
   try {
     // Load products
-    const { data: products, error: productsError } = await supabase
+    const { data: products, error: productsError } = await supabaseClient
       .from('products')
       .select('*')
       .eq('session_id', sessionId);
@@ -293,7 +297,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
     if (productsError) throw productsError;
 
     // Load daily plan
-    const { data: dailyPlan, error: _dailyError } = await supabase
+    const { data: dailyPlan } = await supabaseClient
       .from('daily_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -302,7 +306,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load weekly plan
-    const { data: weeklyPlan, error: _weeklyError } = await supabase
+    const { data: weeklyPlan } = await supabaseClient
       .from('weekly_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -311,7 +315,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load monthly plan
-    const { data: monthlyPlan, error: _monthlyError } = await supabase
+    const { data: monthlyPlan } = await supabaseClient
       .from('monthly_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -320,7 +324,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load ad-hoc plan
-    const { data: adHocPlan, error: _adHocError } = await supabase
+    const { data: adHocPlan } = await supabaseClient
       .from('adhoc_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -329,7 +333,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load app settings
-    const { data: settings, error: settingsError } = await supabase
+    const { data: settings, error: settingsError } = await supabaseClient
       .from('app_settings')
       .select('*')
       .eq('session_id', sessionId);
@@ -351,19 +355,19 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       } : null,
       weeklyPlan: weeklyPlan ? {
         ...weeklyPlan,
-        days: weeklyPlan.days.map((day: any) => ({
+        days: weeklyPlan.days.map((day: Record<string, unknown>) => ({
           ...day,
-          date: new Date(day.date),
+          date: new Date(day.date as string),
           products: day.products
         }))
       } : null,
       monthlyPlan: monthlyPlan ? {
         ...monthlyPlan,
-        weeks: monthlyPlan.weeks.map((week: any) => ({
+        weeks: monthlyPlan.weeks.map((week: Record<string, unknown>) => ({
           ...week,
-          days: week.days.map((day: any) => ({
+          days: (week.days as Record<string, unknown>[]).map((day: Record<string, unknown>) => ({
             ...day,
-            date: new Date(day.date),
+            date: new Date(day.date as string),
             products: day.products
           }))
         }))

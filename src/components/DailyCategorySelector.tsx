@@ -131,8 +131,8 @@ export default function DailyCategorySelector({
             <div className="mt-1 text-sm text-blue-700">
               <p>• Each day gets 9 products (3 from each selected category)</p>
               <p>• You can select the same category multiple times for variety</p>
-              <p>• Use "Copy to All" to apply one day's selection to all days</p>
-              <p>• Use "Random" to let the system choose any available product</p>
+              <p>• Use &quot;Copy to All&quot; to apply one day&apos;s selection to all days</p>
+              <p>• Use &quot;Random&quot; to let the system choose any available product</p>
             </div>
           </div>
         </div>

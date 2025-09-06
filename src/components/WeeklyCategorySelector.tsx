@@ -154,7 +154,7 @@ export default function WeeklyCategorySelector({
               <p>• Each day in a week uses the same 3 category selections</p>
               <p>• Each day gets 9 products total (3 from each category)</p>
               <p>• Products will be different each day, but from the same categories</p>
-              <p>• Use "Copy to All" to apply one week's selection to all weeks</p>
+              <p>• Use &quot;Copy to All&quot; to apply one week&apos;s selection to all weeks</p>
             </div>
           </div>
         </div>

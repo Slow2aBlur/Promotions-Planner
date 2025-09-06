@@ -67,8 +67,8 @@ export default function ProductReplacementModal({
       // Search by product ID, name, SKU, supplier_price, sale_price
       const matchesId = product.product_id.toLowerCase().includes(searchTermLower);
       const matchesName = product.product_name.toLowerCase().includes(searchTermLower);
-      const matchesSku = (product as any).sku?.toLowerCase().includes(searchTermLower) || false;
-      const matchesSupplierPrice = (product as any).supplier_price?.toString().includes(searchTermLower) || false;
+      const matchesSku = (product as unknown as Record<string, unknown>).sku?.toString().toLowerCase().includes(searchTermLower) || false;
+      const matchesSupplierPrice = (product as unknown as Record<string, unknown>).supplier_price?.toString().includes(searchTermLower) || false;
       const matchesSalePrice = product.five_percent_sale_price?.toString().includes(searchTermLower) || false;
       
       return (matchesId || matchesName || matchesSku || matchesSupplierPrice || matchesSalePrice) &&
@@ -215,10 +215,10 @@ export default function ProductReplacementModal({
                         </h5>
                         <div className="flex flex-wrap gap-4 text-xs text-gray-600">
                           <span>Brand: {product.brand || 'N/A'}</span>
-                          <span>SKU: {(product as any).sku || 'N/A'}</span>
+                          <span>SKU: {String((product as unknown as Record<string, unknown>).sku || 'N/A')}</span>
                           <span>Views: {product.views.toLocaleString()}</span>
                           <span>Reg Price: R{Math.round(product.regular_price)}</span>
-                          {(product as any).supplier_price && <span>Supplier: R{Math.round((product as any).supplier_price)}</span>}
+                          {(product as unknown as Record<string, unknown>).supplier_price ? <span>Supplier: R{Math.round(Number((product as unknown as Record<string, unknown>).supplier_price))}</span> : null}
                           {product.five_percent_sale_price && <span>Sale: R{Math.round(product.five_percent_sale_price)}</span>}
                         </div>
                       </div>
@@ -239,7 +239,7 @@ export default function ProductReplacementModal({
           {selectedCategory && availableProducts.length === 0 && (
             <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
               <p className="text-sm text-orange-700">
-                No available products in the "{selectedCategory}" category that aren't already used in your plan.
+                No available products in the &quot;{selectedCategory}&quot; category that aren&apos;t already used in your plan.
               </p>
             </div>
           )}

@@ -16,5 +16,5 @@ const createMockClient = () => ({
 });
 
 export const supabase = (!supabaseUrl || !supabaseAnonKey) 
-  ? createMockClient() as any
+  ? createMockClient() as unknown
   : createClient(supabaseUrl, supabaseAnonKey);
