@@ -1,0 +1,5 @@
+[33m1c3f4fb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Fix all TypeScript and linting errors for successful Vercel deployment
+[33mf26d153[m Fix TypeScript and linting errors for Vercel deployment
+[33m5089869[m Update favicon to use DD logo and improve app metadata
+[33m85f7de2[m Fix ad-hoc summary to show only approved products totals
+[33md395070[m[33m ([m[1;33mtag: [m[1;33mv2.0.0[m[33m)[m Major feature update: Enhanced promotion planner with advanced functionality
