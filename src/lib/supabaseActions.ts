@@ -1,4 +1,4 @@
-import { supabaseClient } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { PromotionRecord, WeeklyPlan } from './types';
 
 // Fetch recent promotions from the database
@@ -6,7 +6,7 @@ export async function getRecentPromotions(days: number): Promise<PromotionRecord
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
-  const { data, error } = await supabaseClient
+  const { data, error } = await supabase
     .from('promotions')
     .select('*')
     .gte('promotion_date', dateThreshold.toISOString().split('T')[0])
@@ -35,7 +35,7 @@ export async function saveWeeklyPlan(plan: WeeklyPlan): Promise<void> {
     });
   });
 
-  const { error } = await supabaseClient
+  const { error } = await supabase
     .from('promotions')
     .insert(promotionRecords);
 

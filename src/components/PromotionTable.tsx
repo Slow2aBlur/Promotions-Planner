@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { WeeklyPlan, Product } from '@/lib/types';
+import { WeeklyPlan } from '@/lib/types';
 import { formatDisplayDate } from '@/utils/dateUtils';
 import EditablePrice from './EditablePrice';
 import StockStatusIndicator, { needsStockAttention } from './StockStatusIndicator';

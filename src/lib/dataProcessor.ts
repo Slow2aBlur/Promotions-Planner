@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { Product, PromotionRecord, WeeklyPlan, DayPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections } from './types';
+import { Product, WeeklyPlan, DayPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections } from './types';
 import { getNextSevenDays, getMonthlyWeeks, getCurrentMonthYear } from '@/utils/dateUtils';
 
 // CSV parsing and product enrichment
@@ -655,12 +655,12 @@ export function generateMonthlyPromotionPlan(
   
   // Filter out recently promoted products (same logic as before)
   const eligibleProducts = businessRuleFilteredProducts.filter(
-    product => true // For now, no recent promotion filtering - can be enhanced later
+    () => true // For now, no recent promotion filtering - can be enhanced later
   );
   
   const weeks: WeeklyPlan[] = monthlyWeeks.map((weekInfo, weekIndex) => {
     const weekSelections = weeklySelections[weekIndex] || ['Random', 'Random', 'Random'];
-    const weekProducts = new Set<string>(); // Track products for this week only
+    // const weekProducts = new Set<string>(); // Track products for this week only
     
     const days: DayPlan[] = weekInfo.days.map(({ date, dayName }) => {
       const dayProducts: Product[] = [];

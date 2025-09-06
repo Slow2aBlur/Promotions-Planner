@@ -9,7 +9,7 @@ import MonthlyPromotionTable from '@/components/MonthlyPromotionTable';
 import ProductReplacementModal from '@/components/ProductReplacementModal';
 import CategoryAlternativeModal from '@/components/CategoryAlternativeModal';
 import { processProductCSV, generateDailyPromotionPlan, generateFlexibleWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, filterEligibleProducts, getStockStatusSummary } from '@/lib/dataProcessor';
-import { saveWeeklyPlan } from '@/lib/supabaseActions';
+// import { saveWeeklyPlan } from '@/lib/supabaseActions';
 import { 
   createNewSession, 
   getActiveSessions, 
@@ -51,7 +51,7 @@ export default function Home() {
   
   const [dailyPlan, setDailyPlan] = useState<DayPlan | null>(null);
   
-  const [planningMode, setPlanningMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [planningMode, setPlanningMode] = useState<'daily' | 'weekly' | 'monthly' | 'adHoc'>('daily');
   
   // Weekly planning configuration
   const [weeklyConfig, setWeeklyConfig] = useState<WeeklyConfiguration>({
@@ -191,8 +191,8 @@ export default function Home() {
       if (activeSession) {
         setBackupSessionId(activeSession.id);
       }
-    } catch (_error) {
-      console.warn('Failed to load sessions:', _error);
+    } catch {
+      console.warn('Failed to load sessions');
     }
   };
 
@@ -205,7 +205,7 @@ export default function Home() {
       setBackupSessionId(sessionId);
       await loadAvailableSessions();
       setSuccess('New backup session created!');
-    } catch (_error) {
+    } catch {
       setError('Failed to create backup session');
     }
   };
@@ -225,14 +225,14 @@ export default function Home() {
       setWeeklySelections(state.weeklySelections);
       setWeeklyConfig(state.weeklyConfig);
       setWeeklyCategoryConfig(state.weeklyCategoryConfig);
-      setPlanningMode(state.planningMode as any);
+      setPlanningMode(state.planningMode as 'daily' | 'weekly' | 'monthly' | 'adHoc');
       setUniqueCategories(state.uniqueCategories);
       setUploadedFileName(state.uploadedFileName);
       setExpectedQuantity(state.expectedQuantity);
       setBackupSessionId(sessionId);
       
       setSuccess('Session restored successfully!');
-    } catch (_error) {
+    } catch {
       setError('Failed to restore session');
     } finally {
       setLoading(false);
@@ -265,7 +265,7 @@ export default function Home() {
 
       await saveFullApplicationState(backupSessionId, currentState, 'Manual Save');
       setSuccess('Session saved successfully!');
-    } catch (error) {
+    } catch {
       setError('Failed to save session');
     }
   };
@@ -926,8 +926,8 @@ export default function Home() {
     // Add product to the first day of the week
     const updated = {
       ...weeklyPlan,
-      days: weeklyPlan.days.map((day, _index) => {
-        if (_index === 0) {
+      days: weeklyPlan.days.map((day, dayIndex) => {
+        if (dayIndex === 0) {
           return {
             ...day,
             products: [...day.products, product]
@@ -942,10 +942,10 @@ export default function Home() {
   };
 
   const handleNumberOfWeeksChange = (numberOfWeeks: number) => {
-    const newWeeks = Array.from({ length: numberOfWeeks }, (_, _index) => ({
-      startDate: weeklyConfig.weeks[_index]?.startDate || '',
-      endDate: weeklyConfig.weeks[_index]?.endDate || '',
-      targetGPMargin: weeklyConfig.weeks[_index]?.targetGPMargin || 0
+    const newWeeks = Array.from({ length: numberOfWeeks }, (_, weekIndex) => ({
+      startDate: weeklyConfig.weeks[weekIndex]?.startDate || '',
+      endDate: weeklyConfig.weeks[weekIndex]?.endDate || '',
+      targetGPMargin: weeklyConfig.weeks[weekIndex]?.targetGPMargin || 0
     }));
     setWeeklyConfig({
       numberOfWeeks,
@@ -1078,7 +1078,7 @@ export default function Home() {
 
   // Export functions for approved products
   const prepareApprovedProductsExportData = () => {
-    return adHocPlan.approvedProducts.map((approvedProduct, _index) => {
+    return adHocPlan.approvedProducts.map((approvedProduct) => {
       const purchaseCost = approvedProduct.product.purchase_cost || 0;
       const targetMargin = approvedProduct.targetPrice - purchaseCost;
       const totalValue = approvedProduct.targetPrice * approvedProduct.quantity;
@@ -1361,7 +1361,7 @@ export default function Home() {
             'Total GP': totalGP,
             'Save': Math.round((product.regular_price || 0) - salePrice),
             'Views': Number(product.views || 0),
-            'Stock': product.stock_status === 'instock' ? 'In Stock' : 
+            'Stock Status': product.stock_status === 'instock' ? 'In Stock' : 
                     product.stock_status === 'outofstock' ? 'Out of Stock' : 
                     String(product.stock_status || '')
           });
@@ -1418,7 +1418,27 @@ export default function Home() {
   };
 
   const prepareMonthlyExportData = (plan: MonthlyPlan) => {
-    const exportData: any[] = [];
+    const exportData: Array<{
+      week: number;
+      day: string;
+      date: string;
+      product_id: string;
+      product_name: string;
+      brand: string;
+      supplier_name: string;
+      category: string;
+      'Purchase Cost': number;
+      'Reg Price': number;
+      '5% Sale Price': number;
+      'GP Rand Value': number;
+      'GP %': number;
+      'Quantity': number;
+      'Sales Value': number;
+      'Total GP': number;
+      'Save': number;
+      'Views': number;
+      'Stock Status': string;
+    }> = [];
     plan.weeks.forEach(week => {
       week.days.forEach(day => {
         day.products.forEach(product => {
@@ -1431,14 +1451,14 @@ export default function Home() {
           const totalGP = Math.round(gpRandValue * quantity);
 
           exportData.push({
-            'Week': week.weekNumber,
-            'Day': abbreviateDayName(day.dayName),
-            'Date': day.date.toLocaleDateString(),
-            'Product ID': String(product.product_id || ''),
-            'Name': String(product.product_name || ''),
-            'Brand': String(product.brand || ''),
-            'Supplier': String(product.supplier_name || ''),
-            'Category': String(product.category || ''),
+            week: week.weekNumber,
+            day: abbreviateDayName(day.dayName),
+            date: day.date.toLocaleDateString(),
+            product_id: String(product.product_id || ''),
+            product_name: String(product.product_name || ''),
+            brand: String(product.brand || ''),
+            supplier_name: String(product.supplier_name || ''),
+            category: String(product.category || ''),
             'Purchase Cost': Math.round(purchaseCost),
             'Reg Price': Math.round(product.regular_price || 0),
             '5% Sale Price': Math.round(salePrice),
@@ -1449,7 +1469,7 @@ export default function Home() {
             'Total GP': totalGP,
             'Save': Math.round((product.regular_price || 0) - salePrice),
             'Views': Number(product.views || 0),
-            'Stock': product.stock_status === 'instock' ? 'In Stock' : 
+            'Stock Status': product.stock_status === 'instock' ? 'In Stock' : 
                     product.stock_status === 'outofstock' ? 'Out of Stock' : 
                     String(product.stock_status || '')
           });
@@ -2523,7 +2543,7 @@ export default function Home() {
                 )}
 
                 {/* Individual Products */}
-                {adHocPlan.products.map((productData, _index) => {
+                {adHocPlan.products.map((productData, productIndex) => {
                   if (!productData.product) return null;
                   
                   const calculations = calculateAdHocMargins(productData);
@@ -2533,7 +2553,7 @@ export default function Home() {
                     <div key={productData.id} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex justify-between items-start mb-3">
                         <h4 className="text-lg font-medium text-charcoal">
-                          Product {_index + 1}: {productData.product.product_name}
+                          Product {productIndex + 1}: {productData.product.product_name}
                         </h4>
                         <div className="flex gap-2">
                           <button
@@ -2815,7 +2835,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {adHocPlan.approvedProducts.map((approvedProduct, index) => {
+                        {adHocPlan.approvedProducts.map((approvedProduct) => {
                           // All prices already include VAT - no need to strip VAT
                           const purchaseCost = approvedProduct.product.purchase_cost || 0; // Already includes VAT
                           const targetMargin = approvedProduct.targetPrice - purchaseCost; // Direct calculation since all prices include VAT
