@@ -205,7 +205,7 @@ export default function Home() {
       setBackupSessionId(sessionId);
       await loadAvailableSessions();
       setSuccess('New backup session created!');
-    } catch (_error) {
+    } catch {
       setError('Failed to create backup session');
     }
   };
@@ -225,14 +225,14 @@ export default function Home() {
       setWeeklySelections(state.weeklySelections);
       setWeeklyConfig(state.weeklyConfig);
       setWeeklyCategoryConfig(state.weeklyCategoryConfig);
-      setPlanningMode(state.planningMode as any);
+      setPlanningMode(state.planningMode as 'daily' | 'weekly' | 'monthly');
       setUniqueCategories(state.uniqueCategories);
       setUploadedFileName(state.uploadedFileName);
       setExpectedQuantity(state.expectedQuantity);
       setBackupSessionId(sessionId);
       
       setSuccess('Session restored successfully!');
-    } catch (_error) {
+    } catch {
       setError('Failed to restore session');
     } finally {
       setLoading(false);
@@ -265,7 +265,7 @@ export default function Home() {
 
       await saveFullApplicationState(backupSessionId, currentState, 'Manual Save');
       setSuccess('Session saved successfully!');
-    } catch (error) {
+    } catch {
       setError('Failed to save session');
     }
   };
@@ -1418,7 +1418,7 @@ export default function Home() {
   };
 
   const prepareMonthlyExportData = (plan: MonthlyPlan) => {
-    const exportData: any[] = [];
+    const exportData: Record<string, unknown>[] = [];
     plan.weeks.forEach(week => {
       week.days.forEach(day => {
         day.products.forEach(product => {
