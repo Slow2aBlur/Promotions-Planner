@@ -16,11 +16,43 @@ export interface FullApplicationState {
   dailyPlan: DayPlan | null;
   weeklyPlan: WeeklyPlan | null;
   monthlyPlan: MonthlyPlan | null;
-  adHocPlan: any;
-  dailySelections: any;
-  weeklySelections: any;
-  weeklyConfig: any;
-  weeklyCategoryConfig: any;
+  adHocPlan: {
+    isOpen: boolean;
+    products: Array<{
+      id: string;
+      productId: string;
+      product: Product | null;
+      targetPrice: number;
+      targetMargin: number;
+      inputMode: 'price' | 'margin';
+      quantity: number;
+    }>;
+    approvedProducts: Array<{
+      id: string;
+      productId: string;
+      product: Product;
+      targetPrice: number;
+      targetMargin: number;
+      quantity: number;
+      approvedAt: Date;
+    }>;
+    currentProductId: string;
+    maxProducts: number;
+  };
+  dailySelections: Array<[string, string, string]>;
+  weeklySelections: string[][];
+  weeklyConfig: {
+    numberOfWeeks: number;
+    weeks: Array<{
+      startDate: string;
+      endDate: string;
+      targetGPMargin?: number;
+    }>;
+  };
+  weeklyCategoryConfig: {
+    numberOfCategories: number;
+    productsPerCategory: number;
+  };
   planningMode: string;
   uniqueCategories: string[];
   uploadedFileName: string;
@@ -128,7 +160,7 @@ export async function saveFullApplicationState(
       .eq('id', sessionId);
 
   } catch (error) {
-    throw new Error(`Error saving application state: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Error saving application state: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }
 
@@ -143,7 +175,7 @@ export async function saveProducts(sessionId: string, products: Product[]): Prom
         product_name: product.product_name,
         brand: product.brand,
         category: product.category,
-        supplier: product.supplier,
+        supplier: product.supplier_name,
         supplier_name: product.supplier_name,
         purchase_cost: product.purchase_cost,
         regular_price: product.regular_price,
@@ -152,7 +184,7 @@ export async function saveProducts(sessionId: string, products: Product[]): Prom
         custom_gp_percentage: product.custom_gp_percentage,
         views: product.views,
         stock_status: product.stock_status,
-        description: product.description
+        description: product.product_name
       })),
       { onConflict: 'session_id,product_id' }
     );
@@ -169,7 +201,7 @@ export async function saveDailyPlan(sessionId: string, plan: DayPlan, planName: 
       session_id: sessionId,
       plan_name: planName,
       date: plan.date.toISOString().split('T')[0],
-      categories: plan.categories,
+      categories: plan.selectedCategories,
       products: plan.products,
       total_products: plan.products.length
     }, { onConflict: 'session_id,plan_name' });
@@ -186,9 +218,9 @@ export async function saveWeeklyPlan(sessionId: string, plan: WeeklyPlan, planNa
       session_id: sessionId,
       plan_name: planName,
       number_of_weeks: plan.days.length,
-      weekly_config: plan.weeklyConfig,
-      weekly_selections: plan.weeklySelections,
-      weekly_category_config: plan.weeklyCategoryConfig,
+      weekly_config: {},
+      weekly_selections: [],
+      weekly_category_config: {},
       days: plan.days,
       total_products: plan.days.reduce((total, day) => total + day.products.length, 0)
     }, { onConflict: 'session_id,plan_name' });
@@ -204,7 +236,7 @@ export async function saveMonthlyPlan(sessionId: string, plan: MonthlyPlan, plan
     .upsert({
       session_id: sessionId,
       plan_name: planName,
-      month_year: plan.monthYear,
+      month_year: `${plan.year}-${plan.month.toString().padStart(2, '0')}`,
       weeks: plan.weeks,
       total_products: plan.weeks.reduce((total, week) => 
         total + week.days.reduce((weekTotal, day) => weekTotal + day.products.length, 0), 0)
@@ -233,7 +265,7 @@ export async function saveAdHocPlan(sessionId: string, adHocPlan: any, planName:
   }
 }
 
-export async function saveAppSettings(sessionId: string, settings: any): Promise<void> {
+export async function saveAppSettings(sessionId: string, settings: Record<string, unknown>): Promise<void> {
   const settingsArray = Object.entries(settings).map(([key, value]) => ({
     session_id: sessionId,
     setting_key: key,
@@ -261,7 +293,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
     if (productsError) throw productsError;
 
     // Load daily plan
-    const { data: dailyPlan, error: dailyError } = await supabase
+    const { data: dailyPlan, error: _dailyError } = await supabase
       .from('daily_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -270,7 +302,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load weekly plan
-    const { data: weeklyPlan, error: weeklyError } = await supabase
+    const { data: weeklyPlan, error: _weeklyError } = await supabase
       .from('weekly_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -279,7 +311,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load monthly plan
-    const { data: monthlyPlan, error: monthlyError } = await supabase
+    const { data: monthlyPlan, error: _monthlyError } = await supabase
       .from('monthly_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -288,7 +320,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       .single();
 
     // Load ad-hoc plan
-    const { data: adHocPlan, error: adHocError } = await supabase
+    const { data: adHocPlan, error: _adHocError } = await supabase
       .from('adhoc_plans')
       .select('*')
       .eq('session_id', sessionId)
@@ -305,10 +337,10 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
     if (settingsError) throw settingsError;
 
     // Convert settings array to object
-    const settingsObj = settings?.reduce((acc, setting) => {
+    const settingsObj = settings?.reduce((acc: Record<string, unknown>, setting: { setting_key: string; setting_value: unknown }) => {
       acc[setting.setting_key] = setting.setting_value;
       return acc;
-    }, {} as any) || {};
+    }, {} as Record<string, unknown>) || {};
 
     return {
       products: products || [],
@@ -358,7 +390,7 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
     };
 
   } catch (error) {
-    throw new Error(`Error loading application state: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Error loading application state: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }
 
