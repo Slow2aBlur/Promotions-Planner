@@ -9,7 +9,7 @@ import MonthlyPromotionTable from '@/components/MonthlyPromotionTable';
 import ProductReplacementModal from '@/components/ProductReplacementModal';
 import CategoryAlternativeModal from '@/components/CategoryAlternativeModal';
 import { processProductCSV, generateDailyPromotionPlan, generateFlexibleWeeklyPromotionPlan, generateMonthlyPromotionPlan, getUniqueCategories, filterEligibleProducts, getStockStatusSummary } from '@/lib/dataProcessor';
-// import { saveWeeklyPlan } from '@/lib/supabaseActions';
+import { saveDailyPlan, saveWeeklyPlan, saveMonthlyPlan, saveAdHocPlan } from '@/lib/supabaseActions';
 import { 
   createNewSession, 
   getActiveSessions, 
@@ -22,6 +22,7 @@ import {
 } from '@/lib/backupActions';
 import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration } from '@/lib/types';
 import ProductSearchModal from '@/components/ProductSearchModal';
+import SavePromotionModal from '@/components/SavePromotionModal';
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -106,6 +107,7 @@ export default function Home() {
   const [backupSessionId, setBackupSessionId] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<BackupSession[]>([]);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
 
@@ -267,6 +269,59 @@ export default function Home() {
       setSuccess('Session saved successfully!');
     } catch {
       setError('Failed to save session');
+    }
+  };
+
+  const handleSavePromotion = async (saveName: string) => {
+    try {
+      setLoading(true);
+      
+      switch (planningMode) {
+        case 'daily':
+          if (dailyPlan) {
+            await saveDailyPlan(dailyPlan, saveName);
+            setSuccess(`Daily promotion plan "${saveName}" saved successfully!`);
+          } else {
+            setError('No daily plan to save');
+          }
+          break;
+          
+        case 'weekly':
+          if (weeklyPlan) {
+            await saveWeeklyPlan(weeklyPlan, saveName);
+            setSuccess(`Weekly promotion plan "${saveName}" saved successfully!`);
+          } else {
+            setError('No weekly plan to save');
+          }
+          break;
+          
+        case 'monthly':
+          if (monthlyPlan) {
+            await saveMonthlyPlan(monthlyPlan, saveName);
+            setSuccess(`Monthly promotion plan "${saveName}" saved successfully!`);
+          } else {
+            setError('No monthly plan to save');
+          }
+          break;
+          
+        case 'adHoc':
+          if (adHocPlan.approvedProducts.length > 0) {
+            const adHocProducts = adHocPlan.approvedProducts.map(ap => ap.product);
+            await saveAdHocPlan(adHocProducts, saveName);
+            setSuccess(`Ad-hoc promotion plan "${saveName}" saved successfully!`);
+          } else {
+            setError('No approved ad-hoc products to save');
+          }
+          break;
+          
+        default:
+          setError('Invalid planning mode');
+      }
+    } catch (error) {
+      console.error('Error saving promotion:', error);
+      setError(`Failed to save promotion: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1547,9 +1602,9 @@ export default function Home() {
               </button>
               
               <button
-                onClick={saveCurrentSession}
+                onClick={() => setIsSaveModalOpen(true)}
                 className="px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 focus:ring-2 focus:ring-blue-500"
-                disabled={loading || !backupSessionId}
+                disabled={loading}
               >
                 Save Now
               </button>
@@ -3288,6 +3343,14 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Save Promotion Modal */}
+        <SavePromotionModal
+          isOpen={isSaveModalOpen}
+          onClose={() => setIsSaveModalOpen(false)}
+          onSave={handleSavePromotion}
+          planningMode={planningMode}
+        />
       </div>
     </div>
   );

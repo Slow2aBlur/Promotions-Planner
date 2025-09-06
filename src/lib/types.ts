@@ -51,6 +51,7 @@ export interface PromotionRecord {
   product_id: string;
   product_name: string;
   category: string;
+  save_name?: string;
 }
 
 export type PromotionStrategy = 'category' | 'brand' | 'random';
