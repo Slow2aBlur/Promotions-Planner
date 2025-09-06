@@ -2488,30 +2488,60 @@ export default function Home() {
             {/* Products List */}
             {adHocPlan.products.length > 0 && (
               <div className="space-y-4">
-                {/* Total Summary */}
+                {/* Total Summary - Only for Approved Products */}
                 <div className="bg-purple-50 rounded-lg p-4">
-                  <h4 className="text-lg font-medium text-charcoal mb-3">Total Summary</h4>
+                  <h4 className="text-lg font-medium text-charcoal mb-3">Total Summary (Approved Products Only)</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="font-medium text-gray-600">Total Products:</span>
-                      <p className="text-lg font-semibold text-purple-600">{calculateAdHocTotals().productCount}</p>
+                      <p className="text-lg font-semibold text-purple-600">{adHocPlan.approvedProducts.length}</p>
                     </div>
                     <div>
                       <span className="font-medium text-gray-600">Total Sales Value:</span>
-                      <p className="text-lg font-semibold text-blue-600">R{calculateAdHocTotals().totalSalesValue}</p>
+                      <p className="text-lg font-semibold text-blue-600">R{adHocPlan.approvedProducts.length > 0 ? calculateApprovedTotals().totalSalesValue : 0}</p>
                     </div>
                     <div>
                       <span className="font-medium text-gray-600">Total GP:</span>
-                      <p className={`text-lg font-semibold ${calculateAdHocTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        R{calculateAdHocTotals().totalMargin}
+                      <p className={`text-lg font-semibold ${adHocPlan.approvedProducts.length > 0 && calculateApprovedTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        R{adHocPlan.approvedProducts.length > 0 ? calculateApprovedTotals().totalMargin : 0}
                       </p>
                     </div>
                     <div>
-                      <span className="font-medium text-gray-600">Total VAT:</span>
-                      <p className="text-lg font-semibold text-orange-600">R{calculateAdHocTotals().totalVAT}</p>
+                      <span className="font-medium text-gray-600">All Prices Include VAT:</span>
+                      <p className="text-lg font-semibold text-orange-600">15%</p>
                     </div>
                   </div>
                 </div>
+
+                {/* Analysis Products Summary */}
+                {adHocPlan.products.length > 0 && (
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    <h4 className="text-lg font-medium text-charcoal mb-3">Analysis Products ({adHocPlan.products.length} products being analyzed)</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-600">Products in Analysis:</span>
+                        <p className="text-lg font-semibold text-blue-600">{adHocPlan.products.length}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total Sales Value:</span>
+                        <p className="text-lg font-semibold text-blue-600">R{calculateAdHocTotals().totalSalesValue}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total GP:</span>
+                        <p className={`text-lg font-semibold ${calculateAdHocTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          R{calculateAdHocTotals().totalMargin}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">All Prices Include VAT:</span>
+                        <p className="text-lg font-semibold text-orange-600">15%</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-2">
+                      💡 These products are being analyzed. Click "Approve" to add them to your approved products table below.
+                    </p>
+                  </div>
+                )}
 
                 {/* Individual Products */}
                 {adHocPlan.products.map((productData, index) => {
