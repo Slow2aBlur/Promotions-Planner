@@ -20,7 +20,18 @@ import {
   BackupSession,
   FullApplicationState
 } from '@/lib/backupActions';
-import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration } from '@/lib/types';
+import { 
+  createSession, 
+  updateSession, 
+  deleteSession, 
+  renameSession, 
+  duplicateSession, 
+  exportSession, 
+  importSession, 
+  getSortedSessionIndex, 
+  getSessionSnapshot 
+} from '@/lib/sessionManager';
+import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration, SessionIndexEntry } from '@/lib/types';
 import ProductSearchModal from '@/components/ProductSearchModal';
 import SavePromotionModal from '@/components/SavePromotionModal';
 import BundleModal from '@/components/BundleModal';
@@ -154,6 +165,7 @@ export default function Home() {
       productId: string;
       product: Product;
       quantity: number;
+      targetPrice: number;
     }>;
     bundlePrice: number;
     bundleMargin: number;
@@ -173,6 +185,15 @@ export default function Home() {
     }>,
     bundlePrice: 0
   });
+
+  // Session management state
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [sessionIndex, setSessionIndex] = useState<SessionIndexEntry[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [autoSaveLabel, setAutoSaveLabel] = useState('Auto-save (30s)');
+  const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
+  const [sourceFileHash, setSourceFileHash] = useState<string>('');
 
   // BACKUP SYSTEM FUNCTIONS
   
@@ -802,6 +823,7 @@ export default function Home() {
         currentProductId: '' // Clear the input
       }));
 
+      setIsDirty(true);
       setSuccess(`Bulk approve completed! Added ${addedCount} products${skippedCount > 0 ? `, skipped ${skippedCount} products (already added or not found)` : ''}`);
       setTimeout(() => setSuccess(null), 5000);
     } else {
@@ -836,6 +858,7 @@ export default function Home() {
         return p;
       })
     }));
+    setIsDirty(true);
   };
 
   const removeAdHocProduct = (productId: string) => {
@@ -843,6 +866,7 @@ export default function Home() {
       ...prev,
       products: prev.products.filter(p => p.id !== productId)
     }));
+    setIsDirty(true);
   };
 
   const approveAdHocProduct = (productId: string) => {
@@ -864,6 +888,7 @@ export default function Home() {
       approvedProducts: [...prev.approvedProducts, approvedProduct],
       products: prev.products.filter(p => p.id !== productId)
     }));
+    setIsDirty(true);
   };
 
   const removeApprovedProduct = (productId: string) => {
@@ -871,6 +896,7 @@ export default function Home() {
       ...prev,
       approvedProducts: prev.approvedProducts.filter(p => p.id !== productId)
     }));
+    setIsDirty(true);
   };
 
   const updateApprovedProductQuantity = (productId: string, quantity: number) => {
@@ -880,6 +906,7 @@ export default function Home() {
         p.id === productId ? { ...p, quantity: Math.max(1, quantity) } : p
       )
     }));
+    setIsDirty(true);
   };
 
   const updateApprovedProductPrice = (productId: string, targetPrice: number) => {
@@ -894,6 +921,7 @@ export default function Home() {
         return p;
       })
     }));
+    setIsDirty(true);
   };
 
   // Bundle functions
@@ -942,6 +970,7 @@ export default function Home() {
       }]
     }));
 
+    setIsDirty(true);
     setSuccess(`Added ${approvedProduct.product.product_name} to bundle`);
     setTimeout(() => setSuccess(null), 2000);
   };
@@ -951,6 +980,7 @@ export default function Home() {
       ...prev,
       selectedProducts: prev.selectedProducts.filter(p => p.productId !== productId)
     }));
+    setIsDirty(true);
   };
 
   const handleUpdateBundleProductQuantity = (productId: string, quantity: number) => {
@@ -960,10 +990,12 @@ export default function Home() {
         p.productId === productId ? { ...p, quantity: Math.max(1, quantity) } : p
       )
     }));
+    setIsDirty(true);
   };
 
   const handleUpdateBundleCreation = (updates: Partial<typeof bundleCreation>) => {
     setBundleCreation(prev => ({ ...prev, ...updates }));
+    setIsDirty(true);
   };
 
   const calculateBundleMargin = () => {
@@ -981,6 +1013,7 @@ export default function Home() {
       productId: string;
       product: Product;
       quantity: number;
+      targetPrice: number;
     }>;
     bundlePrice: number;
     bundleMargin: number;
@@ -994,6 +1027,7 @@ export default function Home() {
     };
     
     setBundles(prev => [...prev, newBundle]);
+    setIsDirty(true);
     
     // Reset bundle creation state with auto-increment
     setBundleCreation({
@@ -1010,6 +1044,398 @@ export default function Home() {
 
   const removeBundle = (bundleId: string) => {
     setBundles(prev => prev.filter(b => b.id !== bundleId));
+    setIsDirty(true);
+  };
+
+  // Session management functions
+  const handleSaveNow = async () => {
+    if (isSaving) return;
+    
+    setIsSaving(true);
+    
+    try {
+      const now = new Date();
+      const timeStr = now.toLocaleString('en-GB', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+      
+      if (!currentSessionId) {
+        // Create new session
+        const sessionName = `Plan – ${uploadedFileName || 'Untitled'} – ${timeStr}`;
+        const sessionId = createSession(
+          sessionName,
+          uploadedFileName || 'Untitled',
+          sourceFileHash,
+          planningMode === 'daily' ? 'Daily' : planningMode === 'weekly' ? 'Weekly' : planningMode === 'monthly' ? 'Monthly' : 'Daily',
+          adHocPlan.approvedProducts,
+          bundles,
+          calculateApprovedTotals(),
+          { filters: {}, sort: {}, selectedRows: [], scrollPosition: 0 }
+        );
+        
+        setCurrentSessionId(sessionId);
+        setSuccess(`Saved "${sessionName}" at ${timeStr}`);
+      } else {
+        // Update existing session
+        updateSession(
+          currentSessionId,
+          adHocPlan.approvedProducts,
+          bundles,
+          calculateApprovedTotals(),
+          { filters: {}, sort: {}, selectedRows: [], scrollPosition: 0 }
+        );
+        
+        setSuccess(`Saved "${sessionIndex.find(s => s.id === currentSessionId)?.name}" at ${timeStr}`);
+      }
+      
+      setIsDirty(false);
+      setAutoSaveLabel(`Auto-saved at ${timeStr}`);
+      
+      // Refresh session index
+      const index = getSortedSessionIndex();
+      setSessionIndex(index);
+      
+    } catch (error) {
+      setError('Failed to save session');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAutoSave = async () => {
+    if (!currentSessionId || !isDirty) return;
+    
+    try {
+      updateSession(
+        currentSessionId,
+        adHocPlan.approvedProducts,
+        bundles,
+        calculateApprovedTotals(),
+        { filters: {}, sort: {}, selectedRows: [], scrollPosition: 0 }
+      );
+      
+      const now = new Date();
+      const timeStr = now.toLocaleString('en-GB', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+      
+      setAutoSaveLabel(`Auto-saved at ${timeStr}`);
+      setIsDirty(false);
+      
+      // Refresh session index
+      const index = getSortedSessionIndex();
+      setSessionIndex(index);
+      
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    }
+  };
+
+  const handleLoadSession = (sessionId: string) => {
+    if (isDirty) {
+      const confirmed = window.confirm('You have unsaved changes. Load selected session and discard changes?');
+      if (!confirmed) return;
+    }
+    
+    const snapshot = getSessionSnapshot(sessionId);
+    if (!snapshot) {
+      setError('Session not found');
+      return;
+    }
+    
+    // Check if source file matches
+    if (snapshot.sourceFile.hash !== sourceFileHash) {
+      setError(`This session was created with ${snapshot.sourceFile.name}. Some IDs may not exist in the current file.`);
+    }
+    
+    // Restore ad-hoc products
+    const restoredAdHocProducts = snapshot.adHocProducts.map(item => {
+      const product = products.find(p => p.product_id === item.id);
+      if (!product) {
+        // Product not found in current file - mark as missing
+        return {
+          id: `missing_${item.id}`,
+          productId: item.id,
+          product: {
+            product_id: item.id,
+            product_name: item.name,
+            supplier_name: item.supplier,
+            brand: item.brand,
+            regular_price: item.promoPrice,
+            sale_price: item.promoPrice,
+            purchase_cost: item.cost,
+            category: item.category,
+            views: 0,
+            stock_status: 'unknown'
+          },
+          targetPrice: item.promoPrice,
+          targetMargin: item.promoPrice > 0 ? ((item.promoPrice - item.cost) / item.promoPrice) * 100 : 0,
+          quantity: item.qty,
+          approvedAt: new Date()
+        };
+      }
+      
+      return {
+        id: `adhoc_${item.id}`,
+        productId: item.id,
+        product,
+        targetPrice: item.promoPrice,
+        targetMargin: item.promoPrice > 0 ? ((item.promoPrice - item.cost) / item.promoPrice) * 100 : 0,
+        quantity: item.qty,
+        approvedAt: new Date()
+      };
+    });
+    
+    // Restore bundles
+    const restoredBundles = snapshot.bundles.map(bundle => ({
+      id: `bundle_${Date.now()}_${Math.random()}`,
+      bundleName: bundle.name,
+      description: '',
+      products: bundle.items.map(item => {
+        const product = products.find(p => p.product_id === item.id);
+        if (!product) {
+          // Product not found - create placeholder
+          return {
+            productId: item.id,
+            product: {
+              product_id: item.id,
+              product_name: item.name,
+              supplier_name: 'Unknown',
+              brand: 'Unknown',
+              regular_price: item.promoPrice,
+              sale_price: item.promoPrice,
+              purchase_cost: item.cost,
+              category: 'Unknown',
+              views: 0,
+              stock_status: 'unknown'
+            },
+            quantity: item.qty,
+            targetPrice: item.promoPrice
+          };
+        }
+        
+        return {
+          productId: item.id,
+          product,
+          quantity: item.qty,
+          targetPrice: item.promoPrice
+        };
+      }),
+      bundlePrice: bundle.bundlePrice,
+      bundleMargin: bundle.gpR,
+      individualQuantity: 1,
+      createdAt: new Date()
+    }));
+    
+    // Update state
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: restoredAdHocProducts
+    }));
+    
+    setBundles(restoredBundles);
+    setCurrentSessionId(sessionId);
+    setIsDirty(false);
+    
+    setSuccess(`Loaded "${snapshot.sourceFile.name}" from ${snapshot.savedAt}`);
+  };
+
+  const handleNewSession = () => {
+    if (isDirty) {
+      const confirmed = window.confirm('You have unsaved changes. Start new session and discard changes?');
+      if (!confirmed) return;
+    }
+    
+    setCurrentSessionId(null);
+    setIsDirty(false);
+    setAdHocPlan(prev => ({
+      ...prev,
+      approvedProducts: []
+    }));
+    setBundles([]);
+    setSuccess('New session started');
+  };
+
+  // Unified export data builder
+  const buildExportData = () => {
+    const rows: Record<string, string | number>[] = [];
+    
+    // Header row
+    rows.push({
+      'Row Type': 'Header',
+      'Bundle Name': 'Bundle Name',
+      'Bundle IDs': 'Bundle IDs',
+      'Product ID': 'Product ID',
+      'Product Name': 'Product Name',
+      'Brand': 'Brand',
+      'Category': 'Category',
+      'Supplier': 'Supplier',
+      'Qty': 'Qty',
+      'Unit Cost (R)': 'Unit Cost (R)',
+      'Unit Promo Price (R)': 'Unit Promo Price (R)',
+      'Row Cost (R)': 'Row Cost (R)',
+      'Row Selling (R)': 'Row Selling (R)',
+      'Row GP (R)': 'Row GP (R)',
+      'Row Margin %': 'Row Margin %',
+      'Accumulated Cost (R)': 'Accumulated Cost (R)',
+      'Accumulated Selling (R)': 'Accumulated Selling (R)',
+      'Bundle Selling Price (R)': 'Bundle Selling Price (R)',
+      'GP (R)': 'GP (R)',
+      'Margin %': 'Margin %',
+      'Total Saved (R)': 'Total Saved (R)',
+      'Saved %': 'Saved %'
+    });
+
+    // Individual product rows (ad-hoc products only)
+    adHocPlan.approvedProducts.forEach(product => {
+      const unitCost = product.product.purchase_cost || 0;
+      const unitPromoPrice = product.targetPrice || 0;
+      const qty = product.quantity || 0;
+      const rowCost = unitCost * qty;
+      const rowSelling = unitPromoPrice * qty;
+      const rowGP = rowSelling - rowCost;
+      const rowMargin = rowSelling > 0 ? (rowGP / rowSelling) * 100 : 0;
+
+      rows.push({
+        'Row Type': 'Product',
+        'Bundle Name': '',
+        'Bundle IDs': '',
+        'Product ID': product.productId,
+        'Product Name': product.product.product_name,
+        'Brand': product.product.brand,
+        'Category': product.product.category,
+        'Supplier': product.product.supplier_name,
+        'Qty': qty,
+        'Unit Cost (R)': unitCost,
+        'Unit Promo Price (R)': unitPromoPrice,
+        'Row Cost (R)': rowCost,
+        'Row Selling (R)': rowSelling,
+        'Row GP (R)': rowGP,
+        'Row Margin %': rowMargin,
+        'Accumulated Cost (R)': '',
+        'Accumulated Selling (R)': '',
+        'Bundle Selling Price (R)': '',
+        'GP (R)': '',
+        'Margin %': '',
+        'Total Saved (R)': '',
+        'Saved %': ''
+      });
+    });
+
+    // Blank separator row
+    rows.push({
+      'Row Type': '',
+      'Bundle Name': '',
+      'Bundle IDs': '',
+      'Product ID': '',
+      'Product Name': '',
+      'Brand': '',
+      'Category': '',
+      'Supplier': '',
+      'Qty': '',
+      'Unit Cost (R)': '',
+      'Unit Promo Price (R)': '',
+      'Row Cost (R)': '',
+      'Row Selling (R)': '',
+      'Row GP (R)': '',
+      'Row Margin %': '',
+      'Accumulated Cost (R)': '',
+      'Accumulated Selling (R)': '',
+      'Bundle Selling Price (R)': '',
+      'GP (R)': '',
+      'Margin %': '',
+      'Total Saved (R)': '',
+      'Saved %': ''
+    });
+
+    // Bundle rows (summary + items)
+    bundles.forEach(bundle => {
+      // Calculate bundle totals
+      const accumulatedCost = bundle.products.reduce((sum, item) => 
+        sum + (item.product.purchase_cost * item.quantity), 0
+      );
+      const accumulatedSelling = bundle.products.reduce((sum, item) => 
+        sum + (item.targetPrice * item.quantity), 0
+      );
+      const bundleSellingPrice = bundle.bundlePrice;
+      const bundleGP = bundleSellingPrice - accumulatedCost;
+      const bundleMargin = bundleSellingPrice > 0 ? (bundleGP / bundleSellingPrice) * 100 : 0;
+      const totalSaved = accumulatedSelling - bundleSellingPrice;
+      const savedPercent = accumulatedSelling > 0 ? (totalSaved / accumulatedSelling) * 100 : 0;
+      const bundleIds = bundle.products.map(p => p.productId).join(', ');
+
+      // Bundle summary row
+      rows.push({
+        'Row Type': 'Bundle',
+        'Bundle Name': bundle.bundleName,
+        'Bundle IDs': bundleIds,
+        'Product ID': '',
+        'Product Name': '',
+        'Brand': '',
+        'Category': '',
+        'Supplier': '',
+        'Qty': '',
+        'Unit Cost (R)': '',
+        'Unit Promo Price (R)': '',
+        'Row Cost (R)': '',
+        'Row Selling (R)': '',
+        'Row GP (R)': '',
+        'Row Margin %': '',
+        'Accumulated Cost (R)': accumulatedCost,
+        'Accumulated Selling (R)': accumulatedSelling,
+        'Bundle Selling Price (R)': bundleSellingPrice,
+        'GP (R)': bundleGP,
+        'Margin %': bundleMargin,
+        'Total Saved (R)': totalSaved,
+        'Saved %': savedPercent
+      });
+
+      // Bundle item rows
+      bundle.products.forEach(item => {
+        const unitCost = item.product.purchase_cost || 0;
+        const unitPromoPrice = item.targetPrice || 0;
+        const qty = item.quantity || 0;
+        const rowCost = unitCost * qty;
+        const rowSelling = unitPromoPrice * qty;
+        const rowGP = rowSelling - rowCost;
+        const rowMargin = rowSelling > 0 ? (rowGP / rowSelling) * 100 : 0;
+
+        rows.push({
+          'Row Type': 'BundleItem',
+          'Bundle Name': bundle.bundleName,
+          'Bundle IDs': '',
+          'Product ID': item.productId,
+          'Product Name': item.product.product_name,
+          'Brand': item.product.brand,
+          'Category': item.product.category,
+          'Supplier': item.product.supplier_name,
+          'Qty': qty,
+          'Unit Cost (R)': unitCost,
+          'Unit Promo Price (R)': unitPromoPrice,
+          'Row Cost (R)': rowCost,
+          'Row Selling (R)': rowSelling,
+          'Row GP (R)': rowGP,
+          'Row Margin %': rowMargin,
+          'Accumulated Cost (R)': '',
+          'Accumulated Selling (R)': '',
+          'Bundle Selling Price (R)': '',
+          'GP (R)': '',
+          'Margin %': '',
+          'Total Saved (R)': '',
+          'Saved %': ''
+        });
+      });
+    });
+
+    return rows;
   };
 
   const calculateAdHocMargins = (productData: { product: Product | null; targetPrice: number; quantity: number }) => {
@@ -1105,11 +1531,16 @@ export default function Home() {
       totalPurchaseCost += purchaseCost * approvedProduct.quantity;
     });
 
+    const totalQuantity = adHocPlan.approvedProducts.reduce((sum, product) => sum + product.quantity, 0);
+    
     return {
-      totalSalesValue: Math.round(totalSalesValue),
-      totalSalesValueExVAT: Math.round(totalSalesValue), // Same as total sales value since all prices include VAT
-      totalMargin: Math.round(totalMargin),
+      totalProducts: adHocPlan.approvedProducts.length,
+      totalQuantity: totalQuantity,
       totalPurchaseCost: Math.round(totalPurchaseCost),
+      totalSalesValue: Math.round(totalSalesValue),
+      totalMargin: Math.round(totalMargin),
+      // Legacy fields for backward compatibility
+      totalSalesValueExVAT: Math.round(totalSalesValue), // Same as total sales value since all prices include VAT
       totalVAT: 0, // No separate VAT calculation since all prices include VAT
       productCount: adHocPlan.approvedProducts.length
     };
@@ -1507,20 +1938,20 @@ export default function Home() {
   };
 
   const exportApprovedProductsToExcel = () => {
-    const data = prepareApprovedProductsExportData();
+    const data = buildExportData();
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Approved Products');
-    XLSX.writeFile(wb, 'approved-products.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, 'Promotion Plan');
+    XLSX.writeFile(wb, 'promotion-plan.xlsx');
   };
 
   const exportApprovedProductsToCSV = () => {
-    const data = prepareApprovedProductsExportData();
-    exportToCSV(data, 'approved-products.csv');
+    const data = buildExportData();
+    exportToCSV(data, 'promotion-plan.csv');
   };
 
   const exportApprovedProductsToGoogleSheets = () => {
-    const data = prepareApprovedProductsExportData();
+    const data = buildExportData();
     exportToGoogleSheets(data);
   };
 
@@ -1528,14 +1959,19 @@ export default function Home() {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const data = prepareApprovedProductsExportData();
+    const data = buildExportData();
     const totals = calculateApprovedTotals();
+
+    // Separate individual products and bundles
+    const individualProducts = data.filter(row => row['Row Type'] === 'Product');
+    const bundles = data.filter(row => row['Row Type'] === 'Bundle');
+    const bundleItems = data.filter(row => row['Row Type'] === 'BundleItem');
 
     const printContent = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Approved Products Report</title>
+          <title>Promotion Plan Report</title>
           <style>
             @page {
               size: A4 landscape;
@@ -1633,7 +2069,7 @@ export default function Home() {
         </head>
         <body>
           <div class="header">
-            <h1>Approved Products Report</h1>
+            <h1>Promotion Plan Report</h1>
             <p>Generated on ${new Date().toLocaleDateString()}</p>
           </div>
           
@@ -3059,74 +3495,84 @@ export default function Home() {
                           );
                         })}
 
-                        {/* Bundle Rows */}
-                        {bundles.map((bundle, bundleIndex) => {
-                          const accumulatedCost = bundle.products.reduce((sum, item) => 
-                            sum + (item.product.purchase_cost * item.quantity), 0
-                          );
-                          const accumulatedSellingPrice = bundle.bundlePrice;
-                          const grossProfit = accumulatedSellingPrice - accumulatedCost;
-                          const marginPercent = accumulatedSellingPrice > 0 ? (grossProfit / accumulatedSellingPrice) * 100 : 0;
-                          const productIds = bundle.products.map(p => p.productId).join(', ');
-                          const productNames = bundle.products.map(p => p.product.product_name).join(' + ');
+            {/* Bundle Rows */}
+            {bundles.map((bundle, bundleIndex) => {
+              const accumulatedCost = bundle.products.reduce((sum, item) => 
+                sum + (item.product.purchase_cost * item.quantity), 0
+              );
+              const accumulatedSellingPrice = bundle.products.reduce((sum, item) => 
+                sum + (item.targetPrice || item.product.regular_price) * item.quantity, 0
+              );
+              const bundleSellingPrice = bundle.bundlePrice;
+              const grossProfit = bundleSellingPrice - accumulatedCost;
+              const marginPercent = bundleSellingPrice > 0 ? (grossProfit / bundleSellingPrice) * 100 : 0;
+              const totalSaved = accumulatedSellingPrice - bundleSellingPrice;
+              const savedPercent = accumulatedSellingPrice > 0 ? (totalSaved / accumulatedSellingPrice) * 100 : 0;
+              const productIds = bundle.products.map(p => p.productId).join(', ');
+              const productNames = bundle.products.map(p => p.product.product_name).join(' + ');
 
-                          return (
-                            <tr key={bundle.id} className="bg-purple-50 border-t-2 border-purple-300">
-                              <td className="px-3 py-4 whitespace-nowrap">
-                                <div className="flex items-center">
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mr-2">
-                                    BUNDLE
-                                  </span>
-                                  <div className="text-sm font-bold text-purple-900">
-                                    {bundle.bundleName} ({productIds})
-                                  </div>
-                                </div>
-                                <div className="text-xs text-purple-700 max-w-xs truncate mt-1" title={`${bundle.bundleName}: ${productNames}`}>
-                                  {bundle.bundleName}: {productNames}
-                                </div>
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-medium">
-                                {productIds}
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
-                                Mixed
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
-                                R{Math.round(accumulatedCost).toLocaleString()}
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
-                                R{Math.round(accumulatedSellingPrice).toLocaleString()}
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm">
-                                <span className={`font-bold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {Math.round(marginPercent)}%
-                                </span>
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
-                                1
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-blue-600 font-bold">
-                                R{Math.round(accumulatedSellingPrice).toLocaleString()}
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm">
-                                <span className={`font-bold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  R{Math.round(grossProfit).toLocaleString()}
-                                </span>
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
-                                {bundle.createdAt.toLocaleDateString()}
-                              </td>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm">
-                                <button
-                                  onClick={() => removeBundle(bundle.id)}
-                                  className="text-red-600 hover:text-red-800 font-medium"
-                                >
-                                  Remove
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
+              return (
+                <tr key={bundle.id} className="bg-purple-50 border-t-2 border-purple-300">
+                  <td className="px-3 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mr-2">
+                        BUNDLE
+                      </span>
+                      <div className="text-sm font-bold text-purple-900">
+                        {bundle.bundleName} ({productIds})
+                      </div>
+                    </div>
+                    <div className="text-xs text-purple-700 max-w-xs truncate mt-1" title={`${bundle.bundleName}: ${productNames}`}>
+                      {bundle.bundleName}: {productNames}
+                      {totalSaved > 0 && (
+                        <span className="text-green-600 font-medium ml-2">
+                          Save R{Math.round(totalSaved).toLocaleString()} ({savedPercent.toFixed(1)}%)
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-medium">
+                    {productIds}
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
+                    Mixed
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                    R{Math.round(accumulatedCost).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                    R{Math.round(bundleSellingPrice).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm">
+                    <span className={`font-bold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {Math.round(marginPercent)}%
+                    </span>
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                    1
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-blue-600 font-bold">
+                    R{Math.round(bundleSellingPrice).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm">
+                    <span className={`font-bold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      R{Math.round(grossProfit).toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
+                    {bundle.createdAt.toLocaleDateString()}
+                  </td>
+                  <td className="px-3 py-4 whitespace-nowrap text-sm">
+                    <button
+                      onClick={() => removeBundle(bundle.id)}
+                      className="text-red-600 hover:text-red-800 font-medium"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
                       </tbody>
                     </table>
                   </div>
@@ -3145,6 +3591,59 @@ export default function Home() {
                 </button>
               </div>
             )}
+
+            {/* Session Management */}
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Session Management</h3>
+                <span className="text-sm text-gray-600">{autoSaveLabel}</span>
+              </div>
+              
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleSaveNow}
+                  disabled={!isDirty || isSaving}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Now'
+                  )}
+                </button>
+                
+                <select
+                  value={currentSessionId || ''}
+                  onChange={(e) => e.target.value && handleLoadSession(e.target.value)}
+                  disabled={sessionIndex.length === 0}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Select Session</option>
+                  {sessionIndex.map(session => (
+                    <option key={session.id} value={session.id}>
+                      {session.name} · {session.updatedAt}
+                    </option>
+                  ))}
+                </select>
+                
+                <button
+                  onClick={handleNewSession}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  New Session
+                </button>
+                
+                <button
+                  onClick={() => setIsSessionManagerOpen(true)}
+                  className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  Manage
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -3541,6 +4040,145 @@ export default function Home() {
           onUpdateBundleProductQuantity={handleUpdateBundleProductQuantity}
           calculateBundleMargin={calculateBundleMargin}
         />
+
+        {/* Session Manager Modal */}
+        {isSessionManagerOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-semibold text-gray-800">Session Manager</h2>
+                <button
+                  onClick={() => setIsSessionManagerOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-auto p-6">
+                <div className="mb-4">
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                          const jsonData = e.target?.result as string;
+                          const sessionId = importSession(jsonData);
+                          if (sessionId) {
+                            setSuccess('Session imported successfully');
+                            const index = getSortedSessionIndex();
+                            setSessionIndex(index);
+                          } else {
+                            setError('Failed to import session');
+                          }
+                        };
+                        reader.readAsText(file);
+                      }
+                    }}
+                    className="hidden"
+                    id="import-session"
+                  />
+                  <label
+                    htmlFor="import-session"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer inline-block"
+                  >
+                    Import JSON
+                  </label>
+                </div>
+                
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="px-4 py-2 text-left">Name</th>
+                      <th className="px-4 py-2 text-left">Updated</th>
+                      <th className="px-4 py-2 text-left">Source File</th>
+                      <th className="px-4 py-2 text-left">Items</th>
+                      <th className="px-4 py-2 text-left">Bundles</th>
+                      <th className="px-4 py-2 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionIndex.map(session => (
+                      <tr key={session.id} className="border-b">
+                        <td className="px-4 py-2">{session.name}</td>
+                        <td className="px-4 py-2">{session.updatedAt}</td>
+                        <td className="px-4 py-2">{session.sourceFile}</td>
+                        <td className="px-4 py-2">{session.itemCount}</td>
+                        <td className="px-4 py-2">{session.bundleCount}</td>
+                        <td className="px-4 py-2">
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => {
+                                handleLoadSession(session.id);
+                                setIsSessionManagerOpen(false);
+                              }}
+                              className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                            >
+                              Load
+                            </button>
+                            <button
+                              onClick={() => {
+                                const newName = prompt('Enter new name:', session.name);
+                                if (newName && newName !== session.name) {
+                                  renameSession(session.id, newName);
+                                  const index = getSortedSessionIndex();
+                                  setSessionIndex(index);
+                                }
+                              }}
+                              className="px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              onClick={() => {
+                                duplicateSession(session.id);
+                                const index = getSortedSessionIndex();
+                                setSessionIndex(index);
+                              }}
+                              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                            >
+                              Duplicate
+                            </button>
+                            <button
+                              onClick={() => {
+                                const jsonData = exportSession(session.id);
+                                const blob = new Blob([jsonData], { type: 'application/json' });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `${session.name}.json`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              }}
+                              className="px-2 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
+                            >
+                              Export
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm('Are you sure you want to delete this session?')) {
+                                  deleteSession(session.id);
+                                  const index = getSortedSessionIndex();
+                                  setSessionIndex(index);
+                                }
+                              }}
+                              className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

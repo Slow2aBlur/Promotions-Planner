@@ -73,6 +73,7 @@ export interface BundleProduct {
   productId: string;
   product: Product;
   quantity: number; // How many of this product in the bundle
+  targetPrice: number; // Target selling price for this product
 }
 
 export interface Bundle {
@@ -84,4 +85,66 @@ export interface Bundle {
   bundleMargin: number; // Total margin for the entire bundle
   individualQuantity: number; // How many of this bundle to sell
   createdAt: Date;
+}
+
+// Session management types
+export interface SessionSnapshot {
+  version: string;
+  savedAt: string; // dd/mm/yyyy HH:mm format
+  sourceFile: {
+    name: string;
+    hash: string;
+  };
+  planningMode: 'Daily' | 'Weekly' | 'Monthly';
+  adHocProducts: Array<{
+    id: string;
+    name: string;
+    brand: string;
+    category: string;
+    supplier: string;
+    cost: number;
+    promoPrice: number;
+    qty: number;
+  }>;
+  bundles: Array<{
+    name: string;
+    ids: string[];
+    items: Array<{
+      id: string;
+      name: string;
+      cost: number;
+      promoPrice: number;
+      qty: number;
+    }>;
+    bundlePrice: number;
+    accumCost: number;
+    accumSelling: number;
+    gpR: number;
+    marginPct: number;
+    savedR: number;
+    savedPct: number;
+  }>;
+  totals: {
+    totalProducts: number;
+    totalQuantity: number;
+    totalPurchaseCost: number;
+    totalSalesValue: number;
+    totalMargin: number;
+  };
+  ui: {
+    filters: Record<string, unknown>;
+    sort: Record<string, unknown>;
+    selectedRows: string[];
+    scrollPosition: number;
+  };
+}
+
+export interface SessionIndexEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+  updatedAt: string;
+  sourceFile: string;
+  itemCount: number;
+  bundleCount: number;
 }

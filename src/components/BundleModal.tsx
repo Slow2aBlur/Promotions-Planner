@@ -106,6 +106,43 @@ export default function BundleModal({
     debouncedUpdateBundlePrice(value);
   };
 
+  // Calculate accumulated costs with proper quantity-aware maths
+  const accumulatedCost = useMemo(() => {
+    return bundleCreation.selectedProducts.reduce((sum, item) => {
+      const cost = item.product.purchase_cost || 0;
+      const quantity = item.quantity || 0;
+      return sum + (cost * quantity);
+    }, 0);
+  }, [bundleCreation.selectedProducts]);
+
+  const accumulatedSellingPrice = useMemo(() => {
+    return bundleCreation.selectedProducts.reduce((sum, item) => {
+      const promoPrice = item.targetPrice || 0;
+      const quantity = item.quantity || 0;
+      return sum + (promoPrice * quantity);
+    }, 0);
+  }, [bundleCreation.selectedProducts]);
+
+  const bundleSellingPrice = useMemo(() => {
+    return bundleCreation.bundlePrice > 0 ? bundleCreation.bundlePrice : accumulatedSellingPrice;
+  }, [bundleCreation.bundlePrice, accumulatedSellingPrice]);
+
+  const grossProfit = useMemo(() => {
+    return bundleSellingPrice - accumulatedCost;
+  }, [bundleSellingPrice, accumulatedCost]);
+
+  const marginPercent = useMemo(() => {
+    return bundleSellingPrice > 0 ? (grossProfit / bundleSellingPrice) * 100 : 0;
+  }, [grossProfit, bundleSellingPrice]);
+
+  const totalSaved = useMemo(() => {
+    return accumulatedSellingPrice - bundleSellingPrice;
+  }, [accumulatedSellingPrice, bundleSellingPrice]);
+
+  const savedPercent = useMemo(() => {
+    return accumulatedSellingPrice > 0 ? (totalSaved / accumulatedSellingPrice) * 100 : 0;
+  }, [totalSaved, accumulatedSellingPrice]);
+
   if (!isOpen) return null;
 
   const handleSave = () => {
@@ -134,7 +171,8 @@ export default function BundleModal({
       products: bundleCreation.selectedProducts.map(item => ({
         productId: item.productId,
         product: item.product,
-        quantity: item.quantity
+        quantity: item.quantity,
+        targetPrice: item.targetPrice
       })),
       bundlePrice: bundleSellingPrice,
       bundleMargin: grossProfit,
@@ -216,38 +254,9 @@ export default function BundleModal({
     handleAddProducts(inputValue);
   };
 
-  // Calculate accumulated costs with proper quantity-aware maths
-  const accumulatedCost = useMemo(() => {
-    return bundleCreation.selectedProducts.reduce((sum, item) => {
-      const cost = item.product.purchase_cost || 0;
-      const quantity = item.quantity || 0;
-      return sum + (cost * quantity);
-    }, 0);
-  }, [bundleCreation.selectedProducts]);
-
-  const accumulatedSellingPrice = useMemo(() => {
-    return bundleCreation.selectedProducts.reduce((sum, item) => {
-      const promoPrice = item.targetPrice || 0;
-      const quantity = item.quantity || 0;
-      return sum + (promoPrice * quantity);
-    }, 0);
-  }, [bundleCreation.selectedProducts]);
-
-  const bundleSellingPrice = useMemo(() => {
-    return bundleCreation.bundlePrice > 0 ? bundleCreation.bundlePrice : accumulatedSellingPrice;
-  }, [bundleCreation.bundlePrice, accumulatedSellingPrice]);
-
-  const grossProfit = useMemo(() => {
-    return bundleSellingPrice - accumulatedCost;
-  }, [bundleSellingPrice, accumulatedCost]);
-
-  const marginPercent = useMemo(() => {
-    return bundleSellingPrice > 0 ? (grossProfit / bundleSellingPrice) * 100 : 0;
-  }, [grossProfit, bundleSellingPrice]);
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-lg w-full max-w-[1440px] max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b">
           <h2 className="text-xl font-semibold text-charcoal">Create Product Bundle</h2>
@@ -298,21 +307,21 @@ export default function BundleModal({
 
         {/* Top Summary Bar - Always Visible */}
         <div className="p-6 bg-gray-50 border-b">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+          <div className="grid grid-cols-2 lg:grid-cols-7 gap-4">
             <div>
-              <span className="text-sm font-medium text-gray-600">Accumulated Cost (R)</span>
+              <span className="text-sm font-medium text-gray-600">Total Cost (R)</span>
               <p className="text-lg font-bold text-orange-600">
                 {formatCurrency(accumulatedCost)}
               </p>
             </div>
             <div>
-              <span className="text-sm font-medium text-gray-600">Accumulated Selling Price (R)</span>
+              <span className="text-sm font-medium text-gray-600">Total Promo Price (R)</span>
               <p className="text-lg font-bold text-blue-600">
                 {formatCurrency(accumulatedSellingPrice)}
               </p>
             </div>
             <div>
-              <span className="text-sm font-medium text-gray-600">Bundle Selling Price (R)</span>
+              <span className="text-sm font-medium text-gray-600">Total Bundle Price (R)</span>
               <input
                 type="text"
                 value={bundlePriceInput}
@@ -327,14 +336,31 @@ export default function BundleModal({
                 {formatCurrency(grossProfit)}
               </p>
             </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm font-medium text-gray-600">Margin %</span>
-                <p className={`text-lg font-bold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {marginPercent.toFixed(1)}%
-                </p>
-              </div>
-              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            <div>
+              <span className="text-sm font-medium text-gray-600">Margin %</span>
+              <p className={`text-lg font-bold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {marginPercent.toFixed(1)}%
+              </p>
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-600">Total Saved (R)</span>
+              <p className={`text-lg font-bold ${
+                totalSaved > 0 ? 'text-green-600' : 
+                totalSaved < 0 ? 'text-red-600' : 
+                'text-gray-600'
+              }`}>
+                {formatCurrency(totalSaved)}
+              </p>
+              <p className={`text-sm ${
+                savedPercent > 0 ? 'text-green-600' : 
+                savedPercent < 0 ? 'text-red-600' : 
+                'text-gray-600'
+              }`}>
+                ({savedPercent.toFixed(1)}%)
+              </p>
+            </div>
+            <div className="flex items-center justify-end">
+              <span className="inline-flex items-center px-3 py-2 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                 Selected ({bundleCreation.selectedProducts.length}/5)
               </span>
             </div>
@@ -345,20 +371,20 @@ export default function BundleModal({
         <div className="flex-1 overflow-hidden">
           {bundleCreation.selectedProducts.length > 0 ? (
             <div className="h-full overflow-auto">
-              <table className="min-w-full">
+              <table className="w-full min-w-[1200px]">
                 <thead className="bg-gray-100 sticky top-0">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Product ID</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Product Name</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Brand</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Category</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Supplier</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Qty</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Cost (R)</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Promo Price (R)</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">GP R</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Margin %</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Remove</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-[100px]">Product ID</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 flex-1 min-w-[200px]">Product Name</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-[120px]">Brand</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-[140px]">Category</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-[120px]">Supplier</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-[90px]">Qty</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-[120px]">Cost (R)</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-[130px]">Promo Price (R)</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-[120px]">GP R</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-[110px]">Margin %</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-[100px]">Remove</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -375,14 +401,19 @@ export default function BundleModal({
 
                     return (
                       <tr key={item.productId} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-3 py-2 text-sm text-gray-900">{item.productId}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900 max-w-xs truncate" title={item.product.product_name}>
-                          {item.product.product_name}
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[100px] whitespace-nowrap">{item.productId}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 flex-1 min-w-[200px] max-w-[300px]">
+                          <div 
+                            className="line-clamp-2 leading-tight" 
+                            title={item.product.product_name}
+                          >
+                            {item.product.product_name}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{item.product.brand}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{item.product.category}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{item.product.supplier_name}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[120px] whitespace-nowrap">{item.product.brand}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[140px] whitespace-nowrap">{item.product.category}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[120px] whitespace-nowrap">{item.product.supplier_name}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[90px]">
                           <input
                             type="number"
                             min="1"
@@ -393,14 +424,14 @@ export default function BundleModal({
                                 e.stopPropagation();
                               }
                             }}
-                            className="w-16 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                           />
                         </td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{formatCurrency(cost)}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{formatCurrency(promoPrice)}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{formatCurrency(rowGP)}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">{rowMarginPercent.toFixed(1)}%</td>
-                        <td className="px-3 py-2 text-sm text-gray-900">
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[120px] text-right">{formatCurrency(cost)}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[130px] text-right">{formatCurrency(promoPrice)}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[120px] text-right">{formatCurrency(rowGP)}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[110px] text-right">{rowMarginPercent.toFixed(1)}%</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 w-[100px] text-center">
                           <button
                             onClick={() => onRemoveProductFromBundle(item.productId)}
                             className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
