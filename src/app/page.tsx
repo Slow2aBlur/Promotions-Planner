@@ -23,6 +23,7 @@ import {
 import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration } from '@/lib/types';
 import ProductSearchModal from '@/components/ProductSearchModal';
 import SavePromotionModal from '@/components/SavePromotionModal';
+import BundleModal from '@/components/BundleModal';
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -143,6 +144,34 @@ export default function Home() {
   });
 
   const [isAddProductOpen, setIsAddProductOpen] = useState<boolean>(false);
+
+  // Bundle system state
+  const [bundles, setBundles] = useState<Array<{
+    id: string;
+    bundleName: string;
+    description?: string;
+    products: Array<{
+      productId: string;
+      product: Product;
+      quantity: number;
+    }>;
+    bundlePrice: number;
+    bundleMargin: number;
+    individualQuantity: number;
+    createdAt: Date;
+  }>>([]);
+  
+  const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
+  const [bundleCreation, setBundleCreation] = useState({
+    bundleName: '',
+    description: '',
+    selectedProducts: [] as Array<{
+      productId: string;
+      product: Product;
+      quantity: number;
+    }>,
+    bundlePrice: 0
+  });
 
   // BACKUP SYSTEM FUNCTIONS
   
@@ -864,6 +893,88 @@ export default function Home() {
         return p;
       })
     }));
+  };
+
+  // Bundle functions
+  const handleCreateBundle = () => {
+    setBundleCreation({
+      bundleName: '',
+      description: '',
+      selectedProducts: [],
+      bundlePrice: 0
+    });
+    setIsBundleModalOpen(true);
+  };
+
+  const handleAddProductToBundle = (productId: string) => {
+    const approvedProduct = adHocPlan.approvedProducts.find(p => p.productId === productId);
+    if (!approvedProduct) return;
+
+    setBundleCreation(prev => ({
+      ...prev,
+      selectedProducts: [...prev.selectedProducts, {
+        productId: approvedProduct.productId,
+        product: approvedProduct.product,
+        quantity: 1
+      }]
+    }));
+  };
+
+  const handleRemoveProductFromBundle = (productId: string) => {
+    setBundleCreation(prev => ({
+      ...prev,
+      selectedProducts: prev.selectedProducts.filter(p => p.productId !== productId)
+    }));
+  };
+
+  const handleUpdateBundleProductQuantity = (productId: string, quantity: number) => {
+    setBundleCreation(prev => ({
+      ...prev,
+      selectedProducts: prev.selectedProducts.map(p => 
+        p.productId === productId ? { ...p, quantity: Math.max(1, quantity) } : p
+      )
+    }));
+  };
+
+  const handleUpdateBundleCreation = (updates: Partial<typeof bundleCreation>) => {
+    setBundleCreation(prev => ({ ...prev, ...updates }));
+  };
+
+  const calculateBundleMargin = () => {
+    const totalCost = bundleCreation.selectedProducts.reduce((sum, item) => 
+      sum + (item.product.purchase_cost * item.quantity), 0
+    );
+    return bundleCreation.bundlePrice - totalCost;
+  };
+
+  const handleSaveBundle = (bundle: Omit<{
+    id: string;
+    bundleName: string;
+    description?: string;
+    products: Array<{
+      productId: string;
+      product: Product;
+      quantity: number;
+    }>;
+    bundlePrice: number;
+    bundleMargin: number;
+    individualQuantity: number;
+    createdAt: Date;
+  }, 'id' | 'createdAt'>) => {
+    const newBundle = {
+      ...bundle,
+      id: `bundle_${Date.now()}_${Math.random()}`,
+      createdAt: new Date()
+    };
+    
+    setBundles(prev => [...prev, newBundle]);
+    setIsBundleModalOpen(false);
+    setSuccess(`Bundle "${bundle.bundleName}" created successfully!`);
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const removeBundle = (bundleId: string) => {
+    setBundles(prev => prev.filter(b => b.id !== bundleId));
   };
 
   const calculateAdHocMargins = (productData: { product: Product | null; targetPrice: number; quantity: number }) => {
@@ -2917,6 +3028,123 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+            {/* Bundle Section */}
+            {adHocPlan.approvedProducts.length > 0 && (
+              <div className="mt-8">
+                <div className="bg-white rounded-lg shadow-lg p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-semibold text-charcoal">Product Bundles</h3>
+                    <button
+                      onClick={handleCreateBundle}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                    >
+                      📦 Create Bundle
+                    </button>
+                  </div>
+
+                  {bundles.length > 0 ? (
+                    <div className="space-y-4">
+                      {bundles.map((bundle) => {
+                        const totalCost = bundle.products.reduce((sum, item) => 
+                          sum + (item.product.purchase_cost * item.quantity), 0
+                        );
+                        const totalMargin = bundle.bundlePrice - totalCost;
+                        const marginPercent = bundle.bundlePrice > 0 ? (totalMargin / bundle.bundlePrice) * 100 : 0;
+
+                        return (
+                          <div key={bundle.id} className="border border-gray-200 rounded-lg p-4">
+                            <div className="flex justify-between items-start mb-3">
+                              <div>
+                                <h4 className="text-lg font-medium text-charcoal">{bundle.bundleName}</h4>
+                                {bundle.description && (
+                                  <p className="text-sm text-gray-600">{bundle.description}</p>
+                                )}
+                                <p className="text-xs text-gray-500">
+                                  Created: {bundle.createdAt.toLocaleDateString()}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => removeBundle(bundle.id)}
+                                className="text-red-600 hover:text-red-800 text-sm"
+                              >
+                                Remove Bundle
+                              </button>
+                            </div>
+
+                            {/* Bundle Totals */}
+                            <div className="bg-purple-50 rounded-lg p-4 mb-4">
+                              <h5 className="font-medium text-charcoal mb-2">Bundle Totals</h5>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div>
+                                  <span className="font-medium text-gray-600">Total Cost:</span>
+                                  <p className="text-lg font-semibold text-orange-600">R{Math.round(totalCost)}</p>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-gray-600">Bundle Price:</span>
+                                  <p className="text-lg font-semibold text-blue-600">R{Math.round(bundle.bundlePrice)}</p>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-gray-600">Total Margin:</span>
+                                  <p className={`text-lg font-semibold ${totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    R{Math.round(totalMargin)}
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-gray-600">Margin %:</span>
+                                  <p className={`text-lg font-semibold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {Math.round(marginPercent)}%
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Bundle Products */}
+                            <div>
+                              <h5 className="font-medium text-charcoal mb-2">Products in Bundle</h5>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                  <thead className="bg-gray-50">
+                                    <tr>
+                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
+                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total Cost</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="bg-white divide-y divide-gray-200">
+                                    {bundle.products.map((item) => (
+                                      <tr key={item.productId}>
+                                        <td className="px-3 py-2 text-sm text-charcoal">
+                                          <div className="max-w-xs truncate" title={item.product.product_name}>
+                                            {item.product.product_name}
+                                          </div>
+                                        </td>
+                                        <td className="px-3 py-2 text-sm text-gray-900">{item.productId}</td>
+                                        <td className="px-3 py-2 text-sm text-gray-900">R{Math.round(item.product.purchase_cost)}</td>
+                                        <td className="px-3 py-2 text-sm text-gray-900">{item.quantity}</td>
+                                        <td className="px-3 py-2 text-sm text-gray-900">
+                                          R{Math.round(item.product.purchase_cost * item.quantity)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>No bundles created yet. Click "Create Bundle" to get started.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -3298,6 +3526,20 @@ export default function Home() {
           onClose={() => setIsSaveModalOpen(false)}
           onSave={handleSavePromotion}
           planningMode={planningMode}
+        />
+
+        {/* Bundle Modal */}
+        <BundleModal
+          isOpen={isBundleModalOpen}
+          onClose={() => setIsBundleModalOpen(false)}
+          onSave={handleSaveBundle}
+          approvedProducts={adHocPlan.approvedProducts}
+          bundleCreation={bundleCreation}
+          onUpdateBundleCreation={handleUpdateBundleCreation}
+          onAddProductToBundle={handleAddProductToBundle}
+          onRemoveProductFromBundle={handleRemoveProductFromBundle}
+          onUpdateBundleProductQuantity={handleUpdateBundleProductQuantity}
+          calculateBundleMargin={calculateBundleMargin}
         />
       </div>
     </div>
