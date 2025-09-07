@@ -67,3 +67,21 @@ export interface WeeklyConfiguration {
   numberOfWeeks: number;
   weeks: WeekConfig[];
 }
+
+// Bundle system types
+export interface BundleProduct {
+  productId: string;
+  product: Product;
+  quantity: number; // How many of this product in the bundle
+}
+
+export interface Bundle {
+  id: string;
+  bundleName: string;
+  description?: string;
+  products: BundleProduct[];
+  bundlePrice: number; // Total price for the entire bundle
+  bundleMargin: number; // Total margin for the entire bundle
+  individualQuantity: number; // How many of this bundle to sell
+  createdAt: Date;
+}

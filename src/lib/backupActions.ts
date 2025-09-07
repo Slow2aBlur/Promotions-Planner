@@ -373,8 +373,14 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
         }))
       } : null,
       adHocPlan: adHocPlan ? {
-        ...adHocPlan,
-        isOpen: adHocPlan.is_active
+        isOpen: adHocPlan.is_active || false,
+        products: adHocPlan.products || [],
+        approvedProducts: (adHocPlan.approved_products || []).map((ap: any) => ({
+          ...ap,
+          approvedAt: ap.approvedAt ? new Date(ap.approvedAt) : new Date()
+        })),
+        currentProductId: adHocPlan.current_product_id || '',
+        maxProducts: adHocPlan.max_products || 30
       } : {
         isOpen: false,
         products: [],
@@ -405,5 +411,23 @@ export async function autoSaveApplicationState(sessionId: string, state: FullApp
   } catch (error) {
     console.warn('Auto-save failed:', error);
     // Don't throw error for auto-save failures
+  }
+}
+
+export async function deleteBackupSession(sessionId: string): Promise<void> {
+  try {
+    const { error } = await supabaseClient
+      .from('backup_sessions')
+      .delete()
+      .eq('id', sessionId);
+
+    if (error) {
+      throw new Error(`Failed to delete session: ${error.message}`);
+    }
+
+    console.log('Session deleted successfully:', sessionId);
+  } catch (error) {
+    console.error('Error deleting session:', error);
+    throw error;
   }
 }
