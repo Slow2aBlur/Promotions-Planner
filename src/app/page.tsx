@@ -169,6 +169,7 @@ export default function Home() {
       productId: string;
       product: Product;
       quantity: number;
+      targetPrice: number;
     }>,
     bundlePrice: 0
   });
@@ -898,7 +899,7 @@ export default function Home() {
   // Bundle functions
   const handleCreateBundle = () => {
     setBundleCreation({
-      bundleName: '',
+      bundleName: `Bundle ${bundles.length + 1}`,
       description: '',
       selectedProducts: [],
       bundlePrice: 0
@@ -936,7 +937,8 @@ export default function Home() {
       selectedProducts: [...prev.selectedProducts, {
         productId: approvedProduct.productId,
         product: approvedProduct.product,
-        quantity: 1
+        quantity: 1,
+        targetPrice: approvedProduct.targetPrice
       }]
     }));
 
@@ -992,9 +994,18 @@ export default function Home() {
     };
     
     setBundles(prev => [...prev, newBundle]);
+    
+    // Reset bundle creation state with auto-increment
+    setBundleCreation({
+      bundleName: `Bundle ${bundles.length + 2}`,
+      description: '',
+      selectedProducts: [],
+      bundlePrice: 0
+    });
+    
     setIsBundleModalOpen(false);
-    setSuccess(`Bundle "${bundle.bundleName}" created successfully!`);
-    setTimeout(() => setSuccess(null), 3000);
+    setSuccess(`Bundle "${bundle.bundleName}" created successfully! Add another bundle?`);
+    setTimeout(() => setSuccess(null), 5000);
   };
 
   const removeBundle = (bundleId: string) => {
@@ -2954,18 +2965,18 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Approved Products Table */}
+                  {/* Products and Bundles Table */}
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product/Bundle</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID(s)</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promo Price</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty (Editable)</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Value</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total GP</th>
                           <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approved</th>
@@ -2973,6 +2984,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
+                        {/* Individual Products */}
                         {adHocPlan.approvedProducts.map((approvedProduct) => {
                           // All prices already include VAT - no need to strip VAT
                           const purchaseCost = approvedProduct.product.purchase_cost || 0; // Already includes VAT
@@ -3046,6 +3058,75 @@ export default function Home() {
                             </tr>
                           );
                         })}
+
+                        {/* Bundle Rows */}
+                        {bundles.map((bundle, bundleIndex) => {
+                          const accumulatedCost = bundle.products.reduce((sum, item) => 
+                            sum + (item.product.purchase_cost * item.quantity), 0
+                          );
+                          const accumulatedSellingPrice = bundle.bundlePrice;
+                          const grossProfit = accumulatedSellingPrice - accumulatedCost;
+                          const marginPercent = accumulatedSellingPrice > 0 ? (grossProfit / accumulatedSellingPrice) * 100 : 0;
+                          const productIds = bundle.products.map(p => p.productId).join(', ');
+                          const productNames = bundle.products.map(p => p.product.product_name).join(' + ');
+
+                          return (
+                            <tr key={bundle.id} className="bg-purple-50 border-t-2 border-purple-300">
+                              <td className="px-3 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mr-2">
+                                    BUNDLE
+                                  </span>
+                                  <div className="text-sm font-bold text-purple-900">
+                                    {bundle.bundleName} ({productIds})
+                                  </div>
+                                </div>
+                                <div className="text-xs text-purple-700 max-w-xs truncate mt-1" title={`${bundle.bundleName}: ${productNames}`}>
+                                  {bundle.bundleName}: {productNames}
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-medium">
+                                {productIds}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
+                                Mixed
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                                R{Math.round(accumulatedCost).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                                R{Math.round(accumulatedSellingPrice).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <span className={`font-bold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {Math.round(marginPercent)}%
+                                </span>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-900 font-bold">
+                                1
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-blue-600 font-bold">
+                                R{Math.round(accumulatedSellingPrice).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <span className={`font-bold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  R{Math.round(grossProfit).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm text-purple-700">
+                                {bundle.createdAt.toLocaleDateString()}
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap text-sm">
+                                <button
+                                  onClick={() => removeBundle(bundle.id)}
+                                  className="text-red-600 hover:text-red-800 font-medium"
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -3053,81 +3134,15 @@ export default function Home() {
               </div>
             )}
 
-            {/* Bundle Section */}
+            {/* Create Bundle Button */}
             {adHocPlan.approvedProducts.length > 0 && (
-              <div className="mt-8">
-                <div className="bg-white rounded-lg shadow-lg p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold text-charcoal">Product Bundles</h3>
-                    <button
-                      onClick={handleCreateBundle}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                    >
-                      📦 Create Bundle
-                    </button>
-                  </div>
-
-                  {bundles.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full border border-gray-300">
-                        <thead className="bg-gray-100">
-                          <tr>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Product ID</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Product Name</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Brand</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Category</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Supplier</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Qty</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Cost</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Promo Price</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">GP R</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Margin %</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total GP</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total Sales</th>
-                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total Cost</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white">
-                          {bundles.flatMap(bundle => 
-                            bundle.products.map((item) => {
-                              const cost = item.product.purchase_cost;
-                              const promoPrice = bundle.bundlePrice / bundle.products.length;
-                              const gpR = promoPrice - cost;
-                              const marginPercent = promoPrice > 0 ? (gpR / promoPrice) * 100 : 0;
-                              const totalGP = gpR * item.quantity;
-                              const totalSale = promoPrice * item.quantity;
-                              const totalCost = cost * item.quantity;
-
-                              return (
-                                <tr key={`${bundle.id}-${item.productId}`}>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.productId}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900 max-w-xs truncate" title={item.product.product_name}>
-                                    {item.product.product_name}
-                                  </td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.brand}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.category}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.supplier_name}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.quantity}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(cost)}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(promoPrice)}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(gpR)}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(marginPercent)}%</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalGP)}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalSale)}</td>
-                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalCost)}</td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>No bundles created yet. Click "Create Bundle" to get started.</p>
-                    </div>
-                  )}
-                </div>
+              <div className="mt-4 text-center">
+                <button
+                  onClick={handleCreateBundle}
+                  className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                >
+                  📦 Create Bundle
+                </button>
               </div>
             )}
           </div>
