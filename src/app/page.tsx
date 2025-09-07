@@ -3068,98 +3068,59 @@ export default function Home() {
                   </div>
 
                   {bundles.length > 0 ? (
-                    <div className="space-y-4">
-                      {bundles.map((bundle) => {
-                        const totalCost = bundle.products.reduce((sum, item) => 
-                          sum + (item.product.purchase_cost * item.quantity), 0
-                        );
-                        const totalMargin = bundle.bundlePrice - totalCost;
-                        const marginPercent = bundle.bundlePrice > 0 ? (totalMargin / bundle.bundlePrice) * 100 : 0;
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border border-gray-300">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Product ID</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Product Name</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Brand</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Category</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Supplier</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Qty</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Cost</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Promo Price</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">GP R</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Margin %</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total GP</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total Sales</th>
+                            <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">Total Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white">
+                          {bundles.flatMap(bundle => 
+                            bundle.products.map((item) => {
+                              const cost = item.product.purchase_cost;
+                              const promoPrice = bundle.bundlePrice / bundle.products.length;
+                              const gpR = promoPrice - cost;
+                              const marginPercent = promoPrice > 0 ? (gpR / promoPrice) * 100 : 0;
+                              const totalGP = gpR * item.quantity;
+                              const totalSale = promoPrice * item.quantity;
+                              const totalCost = cost * item.quantity;
 
-                        return (
-                          <div key={bundle.id} className="border border-gray-200 rounded-lg p-4">
-                            <div className="flex justify-between items-start mb-3">
-                              <div>
-                                <h4 className="text-lg font-medium text-charcoal">{bundle.bundleName}</h4>
-                                {bundle.description && (
-                                  <p className="text-sm text-gray-600">{bundle.description}</p>
-                                )}
-                                <p className="text-xs text-gray-500">
-                                  Created: {bundle.createdAt.toLocaleDateString()}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => removeBundle(bundle.id)}
-                                className="text-red-600 hover:text-red-800 text-sm"
-                              >
-                                Remove Bundle
-                              </button>
-                            </div>
-
-                            {/* Bundle Totals */}
-                            <div className="bg-purple-50 rounded-lg p-4 mb-4">
-                              <h5 className="font-medium text-charcoal mb-2">Bundle Totals</h5>
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                <div>
-                                  <span className="font-medium text-gray-600">Total Cost:</span>
-                                  <p className="text-lg font-semibold text-orange-600">R{Math.round(totalCost)}</p>
-                                </div>
-                                <div>
-                                  <span className="font-medium text-gray-600">Bundle Price:</span>
-                                  <p className="text-lg font-semibold text-blue-600">R{Math.round(bundle.bundlePrice)}</p>
-                                </div>
-                                <div>
-                                  <span className="font-medium text-gray-600">Total Margin:</span>
-                                  <p className={`text-lg font-semibold ${totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    R{Math.round(totalMargin)}
-                                  </p>
-                                </div>
-                                <div>
-                                  <span className="font-medium text-gray-600">Margin %:</span>
-                                  <p className={`text-lg font-semibold ${marginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {Math.round(marginPercent)}%
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Bundle Products */}
-                            <div>
-                              <h5 className="font-medium text-charcoal mb-2">Products in Bundle</h5>
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                  <thead className="bg-gray-50">
-                                    <tr>
-                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
-                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total Cost</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="bg-white divide-y divide-gray-200">
-                                    {bundle.products.map((item) => (
-                                      <tr key={item.productId}>
-                                        <td className="px-3 py-2 text-sm text-charcoal">
-                                          <div className="max-w-xs truncate" title={item.product.product_name}>
-                                            {item.product.product_name}
-                                          </div>
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-gray-900">{item.productId}</td>
-                                        <td className="px-3 py-2 text-sm text-gray-900">R{Math.round(item.product.purchase_cost)}</td>
-                                        <td className="px-3 py-2 text-sm text-gray-900">{item.quantity}</td>
-                                        <td className="px-3 py-2 text-sm text-gray-900">
-                                          R{Math.round(item.product.purchase_cost * item.quantity)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                              return (
+                                <tr key={`${bundle.id}-${item.productId}`}>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.productId}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900 max-w-xs truncate" title={item.product.product_name}>
+                                    {item.product.product_name}
+                                  </td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.brand}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.category}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.product.supplier_name}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{item.quantity}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(cost)}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(promoPrice)}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(gpR)}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(marginPercent)}%</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalGP)}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalSale)}</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-xs text-gray-900">{Math.round(totalCost)}</td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   ) : (
                     <div className="text-center py-8 text-gray-500">
