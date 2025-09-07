@@ -906,9 +906,30 @@ export default function Home() {
     setIsBundleModalOpen(true);
   };
 
-  const handleAddProductToBundle = (productId: string) => {
-    const approvedProduct = adHocPlan.approvedProducts.find(p => p.productId === productId);
-    if (!approvedProduct) return;
+  const handleAddProductToBundle = (productIdOrName: string) => {
+    // Try to find by exact product ID first
+    let approvedProduct = adHocPlan.approvedProducts.find(p => p.productId.toLowerCase() === productIdOrName.toLowerCase());
+    
+    // If not found by ID, try to find by product name
+    if (!approvedProduct) {
+      approvedProduct = adHocPlan.approvedProducts.find(p => 
+        p.product.product_name.toLowerCase().includes(productIdOrName.toLowerCase())
+      );
+    }
+    
+    if (!approvedProduct) {
+      setError(`Product not found: ${productIdOrName}`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    // Check if product is already in bundle
+    const alreadyInBundle = bundleCreation.selectedProducts.some(p => p.productId === approvedProduct.productId);
+    if (alreadyInBundle) {
+      setError(`Product ${approvedProduct.productId} is already in the bundle`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
     setBundleCreation(prev => ({
       ...prev,
@@ -918,6 +939,9 @@ export default function Home() {
         quantity: 1
       }]
     }));
+
+    setSuccess(`Added ${approvedProduct.product.product_name} to bundle`);
+    setTimeout(() => setSuccess(null), 2000);
   };
 
   const handleRemoveProductFromBundle = (productId: string) => {

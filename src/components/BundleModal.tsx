@@ -24,7 +24,16 @@ interface BundleModalProps {
     }>;
     bundlePrice: number;
   };
-  onUpdateBundleCreation: (updates: Partial<typeof bundleCreation>) => void;
+  onUpdateBundleCreation: (updates: Partial<{
+    bundleName: string;
+    description: string;
+    selectedProducts: Array<{
+      productId: string;
+      product: Product;
+      quantity: number;
+    }>;
+    bundlePrice: number;
+  }>) => void;
   onAddProductToBundle: (productId: string) => void;
   onRemoveProductFromBundle: (productId: string) => void;
   onUpdateBundleProductQuantity: (productId: string, quantity: number) => void;
@@ -94,47 +103,70 @@ export default function BundleModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left side - Available Products */}
+        <div className="space-y-6">
+          {/* Product Search/Add Section */}
           <div>
-            <h3 className="text-lg font-medium text-charcoal mb-3">Available Products</h3>
-            <div className="max-h-96 overflow-y-auto border rounded-lg">
-              {availableProducts.length > 0 ? (
-                <div className="space-y-2 p-2">
-                  {availableProducts.map((approved) => (
-                    <div
-                      key={approved.id}
-                      className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50"
-                    >
-                      <div className="flex-1">
-                        <h4 className="font-medium text-charcoal">{approved.product.product_name}</h4>
-                        <p className="text-sm text-gray-600">ID: {approved.productId}</p>
-                        <p className="text-sm text-gray-600">
-                          Price: R{approved.targetPrice.toFixed(2)} | 
-                          Cost: R{approved.product.purchase_cost.toFixed(2)}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => onAddProductToBundle(approved.productId)}
-                        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ))}
+            <h3 className="text-lg font-medium text-charcoal mb-3">Add Products to Bundle</h3>
+            <div className="flex gap-4 mb-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Search by Product Name or ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter product name or ID..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    const searchTerm = e.target.value.toLowerCase();
+                    if (searchTerm.length >= 2) {
+                      // Filter products based on search term
+                      const filtered = approvedProducts.filter(approved => 
+                        approved.product.product_name.toLowerCase().includes(searchTerm) ||
+                        approved.productId.toLowerCase().includes(searchTerm)
+                      );
+                      // You could set this to state to show filtered results
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Product ID
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Enter Product ID..."
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        const productId = e.currentTarget.value.trim();
+                        if (productId) {
+                          onAddProductToBundle(productId);
+                          e.currentTarget.value = '';
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={(e) => {
+                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                      const productId = input.value.trim();
+                      if (productId) {
+                        onAddProductToBundle(productId);
+                        input.value = '';
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Add
+                  </button>
                 </div>
-              ) : (
-                <div className="p-4 text-center text-gray-500">
-                  {approvedProducts.length === 0 
-                    ? 'No approved products available' 
-                    : 'All products are already in the bundle'
-                  }
-                </div>
-              )}
+              </div>
             </div>
           </div>
 
-          {/* Right side - Bundle Configuration */}
+          {/* Bundle Configuration */}
           <div>
             <h3 className="text-lg font-medium text-charcoal mb-3">Bundle Configuration</h3>
             
@@ -221,30 +253,41 @@ export default function BundleModal({
               </div>
             </div>
 
-            {/* Bundle Summary */}
+            {/* Bundle Summary - Always visible when products are selected */}
             {bundleCreation.selectedProducts.length > 0 && (
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <h4 className="font-medium text-charcoal mb-2">Bundle Summary</h4>
-                <div className="text-sm space-y-1">
-                  <div className="flex justify-between">
-                    <span>Total Cost:</span>
-                    <span>R{bundleCreation.selectedProducts.reduce((sum, item) => 
-                      sum + (item.product.purchase_cost * item.quantity), 0
-                    ).toFixed(2)}</span>
+              <div className="mt-6 p-4 bg-green-50 rounded-lg border-2 border-green-200">
+                <h4 className="text-lg font-semibold text-charcoal mb-3">Bundle Summary</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-600">Combined Cost:</span>
+                    <p className="text-xl font-bold text-orange-600">
+                      R{bundleCreation.selectedProducts.reduce((sum, item) => 
+                        sum + (item.product.purchase_cost * item.quantity), 0
+                      ).toFixed(0)}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Bundle Price:</span>
-                    <span>R{bundleCreation.bundlePrice.toFixed(2)}</span>
+                  <div>
+                    <span className="font-medium text-gray-600">Combined Selling Price:</span>
+                    <p className="text-xl font-bold text-blue-600">
+                      R{bundleCreation.bundlePrice.toFixed(0)}
+                    </p>
                   </div>
-                  <div className="flex justify-between font-medium">
-                    <span>Total Margin:</span>
-                    <span>R{calculateBundleMargin().toFixed(2)}</span>
+                  <div>
+                    <span className="font-medium text-gray-600">Total Margin:</span>
+                    <p className={`text-xl font-bold ${calculateBundleMargin() >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      R{calculateBundleMargin().toFixed(0)}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Margin %:</span>
-                    <span>{bundleCreation.bundlePrice > 0 ? 
-                      ((calculateBundleMargin() / bundleCreation.bundlePrice) * 100).toFixed(1) : 0}%</span>
+                  <div>
+                    <span className="font-medium text-gray-600">Margin %:</span>
+                    <p className={`text-xl font-bold ${calculateBundleMargin() >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {bundleCreation.bundlePrice > 0 ? 
+                        ((calculateBundleMargin() / bundleCreation.bundlePrice) * 100).toFixed(1) : 0}%
+                    </p>
                   </div>
+                </div>
+                <div className="mt-3 text-xs text-gray-600">
+                  <p>Products in bundle: {bundleCreation.selectedProducts.length}</p>
                 </div>
               </div>
             )}
