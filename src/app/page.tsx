@@ -103,6 +103,7 @@ export default function Home() {
   });
 
 
+
   // Backup system state
   const [backupSessionId, setBackupSessionId] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<BackupSession[]>([]);
@@ -177,6 +178,43 @@ export default function Home() {
 
     return () => clearInterval(autoSaveInterval);
   }, [autoSaveEnabled, backupSessionId, products, dailyPlan, weeklyPlan, monthlyPlan, adHocPlan, dailySelections, expectedQuantity, planningMode, uniqueCategories, uploadedFileName, weeklyCategoryConfig, weeklyConfig, weeklySelections]);
+  // Save on window close/beforeunload
+  useEffect(() => {
+    const handleBeforeUnload = async (event: BeforeUnloadEvent) => {
+      if (backupSessionId && (dailyPlan || weeklyPlan || monthlyPlan || adHocPlan.approvedProducts.length > 0)) {
+        try {
+          const currentState = {
+            products,
+            dailyPlan,
+            weeklyPlan,
+            monthlyPlan,
+            adHocPlan,
+            dailySelections,
+            weeklySelections,
+            weeklyConfig,
+            weeklyCategoryConfig,
+            planningMode,
+            uniqueCategories,
+            uploadedFileName,
+            lastUploadedFile: null,
+            expectedQuantity
+          };
+
+          // Use sendBeacon for reliable saving on page unload
+          const data = JSON.stringify(currentState);
+          navigator.sendBeacon('/api/save-state', data);
+          
+          console.log('Saved state before page unload');
+        } catch (error) {
+          console.error('Failed to save on page unload:', error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [backupSessionId, dailyPlan, weeklyPlan, monthlyPlan, adHocPlan, products, dailySelections, weeklySelections, weeklyConfig, weeklyCategoryConfig, planningMode, uniqueCategories, uploadedFileName, expectedQuantity]);
+
 
   // Load sessions on component mount
   useEffect(() => {
@@ -398,6 +436,32 @@ export default function Home() {
         setWeeklyPlan(null);
         setMonthlyPlan(null);
         setSuccess(`Successfully generated a daily promotion plan with ${plan.products.length} products!`);
+        
+        // IMMEDIATELY SAVE TO SUPABASE
+        if (backupSessionId) {
+          try {
+            const currentState = {
+              products,
+              dailyPlan: plan,
+              weeklyPlan: null,
+              monthlyPlan: null,
+              adHocPlan,
+              dailySelections,
+              weeklySelections,
+              weeklyConfig,
+              weeklyCategoryConfig,
+              planningMode,
+              uniqueCategories,
+              uploadedFileName,
+              lastUploadedFile: null,
+              expectedQuantity
+            };
+            await saveFullApplicationState(backupSessionId, currentState, 'Auto-save');
+            console.log('Daily plan saved to Supabase immediately!');
+          } catch (error) {
+            console.error('Failed to save daily plan:', error);
+          }
+        }
       } else if (planningMode === 'weekly') {
         // Validate that all weeks have dates set
         const hasAllDates = weeklyConfig.weeks.every(week => week.startDate && week.endDate);
@@ -416,6 +480,32 @@ export default function Home() {
 
         setSuccess(`Successfully generated a ${weeklyConfig.numberOfWeeks}-week promotion plan with custom category selections!`);
         
+        // IMMEDIATELY SAVE TO SUPABASE
+        if (backupSessionId) {
+          try {
+            const currentState = {
+              products,
+              dailyPlan,
+              weeklyPlan: plan,
+              monthlyPlan: null,
+              adHocPlan,
+              dailySelections,
+              weeklySelections,
+              weeklyConfig,
+              weeklyCategoryConfig,
+              planningMode,
+              uniqueCategories,
+              uploadedFileName,
+              lastUploadedFile: null,
+              expectedQuantity
+            };
+            await saveFullApplicationState(backupSessionId, currentState, 'Auto-save');
+            console.log('Weekly plan saved to Supabase immediately!');
+          } catch (error) {
+            console.error('Failed to save weekly plan:', error);
+          }
+        }
+        
         // Show plan view selection modal
         setPlanViewMode('daily'); // Reset to daily view
       } else {
@@ -426,6 +516,32 @@ export default function Home() {
         setMonthlyPlan(plan);
         setWeeklyPlan(null);
         setSuccess(`Successfully generated a monthly promotion plan with custom weekly category selections!`);
+        
+        // IMMEDIATELY SAVE TO SUPABASE
+        if (backupSessionId) {
+          try {
+            const currentState = {
+              products,
+              dailyPlan,
+              weeklyPlan: null,
+              monthlyPlan: plan,
+              adHocPlan,
+              dailySelections,
+              weeklySelections,
+              weeklyConfig,
+              weeklyCategoryConfig,
+              planningMode,
+              uniqueCategories,
+              uploadedFileName,
+              lastUploadedFile: null,
+              expectedQuantity
+            };
+            await saveFullApplicationState(backupSessionId, currentState, 'Auto-save');
+            console.log('Monthly plan saved to Supabase immediately!');
+          } catch (error) {
+            console.error('Failed to save monthly plan:', error);
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while generating the plan');
@@ -586,6 +702,84 @@ export default function Home() {
     }
   };
 
+  // Bulk approve functionality - takes comma-separated Product IDs and adds them all directly to approved
+  const handleBulkApprove = () => {
+    if (!adHocPlan.currentProductId.trim() || !products.length) return;
+    
+    const productIds = adHocPlan.currentProductId.split(',').map(id => id.trim()).filter(id => id);
+    
+    if (productIds.length === 0) {
+      setError('Please enter at least one Product ID');
+      return;
+    }
+
+    const newApprovedProducts: Array<{
+      id: string;
+      productId: string;
+      product: Product;
+      targetPrice: number;
+      targetMargin: number;
+      quantity: number;
+      approvedAt: Date;
+    }> = [];
+
+    let addedCount = 0;
+    let skippedCount = 0;
+
+    for (const productId of productIds) {
+      // Check if we've reached the maximum number of products
+      if (adHocPlan.approvedProducts.length + newApprovedProducts.length >= adHocPlan.maxProducts) {
+        setError(`Maximum number of products (${adHocPlan.maxProducts}) reached. Skipped remaining products.`);
+        break;
+      }
+
+      // Check if product already exists in approved
+      const existingProduct = adHocPlan.approvedProducts.find(p => p.productId.toLowerCase() === productId.toLowerCase());
+      if (existingProduct) {
+        skippedCount++;
+        continue;
+      }
+
+      const product = products.find(p => p.product_id.toLowerCase() === productId.toLowerCase());
+      if (!product) {
+        skippedCount++;
+        continue;
+      }
+
+      // Calculate target price for -5% GP: Price = Cost / (1 - (-5/100)) = Cost / 1.05
+      const purchaseCost = product.purchase_cost || 0;
+      const finalTargetPrice = Math.round(purchaseCost / 1.05);
+      const finalTargetMargin = -5; // -5% GP
+      const quantity = 5; // Default quantity
+
+      newApprovedProducts.push({
+        id: `approved_${Date.now()}_${Math.random()}`,
+        productId,
+        product,
+        targetPrice: finalTargetPrice,
+        targetMargin: finalTargetMargin,
+        quantity: quantity,
+        approvedAt: new Date()
+      });
+
+      addedCount++;
+    }
+
+    if (newApprovedProducts.length > 0) {
+      setAdHocPlan(prev => ({
+        ...prev,
+        approvedProducts: [...prev.approvedProducts, ...newApprovedProducts],
+        currentProductId: '' // Clear the input
+      }));
+
+      setSuccess(`Bulk approve completed! Added ${addedCount} products${skippedCount > 0 ? `, skipped ${skippedCount} products (already added or not found)` : ''}`);
+      setTimeout(() => setSuccess(null), 5000);
+    } else {
+      setError('No valid products found to add');
+    }
+  };
+
+
   const updateAdHocProduct = (productId: string, field: 'targetPrice' | 'targetMargin' | 'quantity' | 'inputMode', value: number | string) => {
     setAdHocPlan(prev => ({
       ...prev,
@@ -718,17 +912,24 @@ export default function Home() {
     let totalSalesValue = 0;
     let totalSalesValueExVAT = 0;
     let totalMargin = 0;
-    let totalVAT = 0;
+    let totalPurchaseCost = 0;
+    let totalQuantity = 0;
 
     adHocPlan.products.forEach(productData => {
       if (productData.product) {
-        const calculations = calculateAdHocMargins(productData);
-        if (calculations) {
-          totalSalesValue += calculations.totalSalesValue;
-          totalSalesValueExVAT += calculations.totalSalesValueExVAT;
-          totalMargin += calculations.totalMargin;
-          totalVAT += calculations.vatAmount;
-        }
+        const purchaseCost = productData.product.purchase_cost || 0;
+        const targetPrice = productData.targetPrice || 0;
+        const quantity = productData.quantity || 0;
+        
+        const salesValue = targetPrice * quantity;
+        const margin = (targetPrice - purchaseCost) * quantity;
+        const purchaseValue = purchaseCost * quantity;
+        
+        totalSalesValue += salesValue;
+        totalSalesValueExVAT += salesValue; // All prices include VAT
+        totalMargin += margin;
+        totalPurchaseCost += purchaseValue;
+        totalQuantity += quantity;
       }
     });
 
@@ -736,7 +937,9 @@ export default function Home() {
       totalSalesValue: Math.round(totalSalesValue),
       totalSalesValueExVAT: Math.round(totalSalesValueExVAT),
       totalMargin: Math.round(totalMargin),
-      totalVAT: Math.round(totalVAT),
+      totalPurchaseCost: Math.round(totalPurchaseCost),
+      totalQuantity: totalQuantity,
+      totalVAT: 0, // No separate VAT calculation since all prices include VAT
       productCount: adHocPlan.products.length
     };
   };
@@ -2513,307 +2716,81 @@ export default function Home() {
             
             {/* Add Product Section */}
             <div className="mb-6">
-              <div className="max-w-md">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Product ID
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={adHocPlan.currentProductId}
-                    onChange={(e) => setAdHocPlan(prev => ({ ...prev, currentProductId: e.target.value }))}
-                    placeholder="Enter Product ID"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  />
-                  <button
-                    onClick={handleAdHocProductLookup}
-                    disabled={!adHocPlan.currentProductId.trim() || !products.length || adHocPlan.products.length >= adHocPlan.maxProducts}
-                    className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-pale-teal disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Add Product
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  All prices include 15% VAT (South African standard rate)
-                </p>
-              </div>
-            </div>
-
-            {/* Products List */}
-            {adHocPlan.products.length > 0 && (
-              <div className="space-y-4">
-                {/* Total Summary - Only for Approved Products */}
-                <div className="bg-purple-50 rounded-lg p-4">
-                  <h4 className="text-lg font-medium text-charcoal mb-3">Total Summary (Approved Products Only)</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium text-gray-600">Total Products:</span>
-                      <p className="text-lg font-semibold text-purple-600">{adHocPlan.approvedProducts.length}</p>
+              <div className="max-w-2xl">
+                <h4 className="text-md font-medium text-charcoal mb-3">Add Products</h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product ID(s) - Single ID or comma-separated list
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={adHocPlan.currentProductId}
+                        onChange={(e) => setAdHocPlan(prev => ({ ...prev, currentProductId: e.target.value }))}
+                        placeholder="Enter Product ID or multiple IDs separated by commas (e.g., 12345, 67890, 11111)"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                      />
                     </div>
-                    <div>
-                      <span className="font-medium text-gray-600">Total Sales Value:</span>
-                      <p className="text-lg font-semibold text-blue-600">R{adHocPlan.approvedProducts.length > 0 ? calculateApprovedTotals().totalSalesValue : 0}</p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={handleAdHocProductLookup}
+                        disabled={!adHocPlan.currentProductId.trim() || !products.length || adHocPlan.products.length >= adHocPlan.maxProducts}
+                        className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-pale-teal disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Add Single Product
+                      </button>
+                      <button
+                        onClick={handleBulkApprove}
+                        disabled={!adHocPlan.currentProductId.trim() || !products.length || adHocPlan.products.length >= adHocPlan.maxProducts}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Bulk Approve All
+                      </button>
                     </div>
-                    <div>
-                      <span className="font-medium text-gray-600">Total GP:</span>
-                      <p className={`text-lg font-semibold ${adHocPlan.approvedProducts.length > 0 && calculateApprovedTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        R{adHocPlan.approvedProducts.length > 0 ? calculateApprovedTotals().totalMargin : 0}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-gray-600">All Prices Include VAT:</span>
-                      <p className="text-lg font-semibold text-orange-600">15%</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Analysis Products Summary */}
-                {adHocPlan.products.length > 0 && (
-                  <div className="bg-blue-50 rounded-lg p-4">
-                    <h4 className="text-lg font-medium text-charcoal mb-3">Analysis Products ({adHocPlan.products.length} products being analyzed)</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium text-gray-600">Products in Analysis:</span>
-                        <p className="text-lg font-semibold text-blue-600">{adHocPlan.products.length}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">Total Sales Value:</span>
-                        <p className="text-lg font-semibold text-blue-600">R{calculateAdHocTotals().totalSalesValue}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">Total GP:</span>
-                        <p className={`text-lg font-semibold ${calculateAdHocTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          R{calculateAdHocTotals().totalMargin}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">All Prices Include VAT:</span>
-                        <p className="text-lg font-semibold text-orange-600">15%</p>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-600 mt-2">
-                      💡 These products are being analyzed. Click &quot;Approve&quot; to add them to your approved products table below.
+                    <p className="text-xs text-gray-500 mt-2">
+                      Defaults: Quantity = 5, Margin = -5% GP, All prices include 15% VAT
                     </p>
                   </div>
-                )}
-
-                {/* Individual Products */}
-                {adHocPlan.products.map((productData, productIndex) => {
-                  if (!productData.product) return null;
-                  
-                  const calculations = calculateAdHocMargins(productData);
-                  if (!calculations) return null;
-
-                  return (
-                    <div key={productData.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex justify-between items-start mb-3">
-                        <h4 className="text-lg font-medium text-charcoal">
-                          Product {productIndex + 1}: {productData.product.product_name}
-                        </h4>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => approveAdHocProduct(productData.id)}
-                            className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => removeAdHocProduct(productData.id)}
-                            className="text-red-600 hover:text-red-800 text-sm"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Product Information */}
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <h5 className="font-medium text-charcoal mb-2">Product Info</h5>
-                          <div className="text-sm space-y-1">
-                            <p><span className="font-medium">ID:</span> {productData.productId}</p>
-                            <p><span className="font-medium">Supplier:</span> {productData.product.supplier_name}</p>
-                            <p><span className="font-medium">Brand:</span> {productData.product.brand}</p>
-                            <p><span className="font-medium">Category:</span> {productData.product.category}</p>
-                          </div>
-                        </div>
-
-                        {/* Current Pricing */}
-                        <div className="bg-blue-50 rounded-lg p-3">
-                          <h5 className="font-medium text-charcoal mb-2">Current Pricing</h5>
-                          <div className="text-sm space-y-1">
-                            <p><span className="font-medium">Purchase Cost:</span> R{Math.round(calculations.purchaseCost)}</p>
-                            <p><span className="font-medium">Regular Price:</span> R{Math.round(calculations.regularPrice)}</p>
-                            <p><span className="font-medium">Current Sale:</span> R{Math.round(calculations.currentSalePrice)}</p>
-                            <p><span className="font-medium">Current Margin:</span> R{Math.round(calculations.currentMargin)} ({Math.round(calculations.currentMarginPercent)}%)</p>
-                            <p><span className="font-medium">Page Views:</span> {productData.product.views || 0}</p>
-                            <p><span className="font-medium">Stock Status:</span> 
-                              <span className={`ml-1 px-2 py-1 rounded text-xs font-medium ${
-                                productData.product.stock_status === 'instock' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : productData.product.stock_status === 'outofstock'
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}>
-                                {productData.product.stock_status === 'instock' ? 'In Stock' :
-                                 productData.product.stock_status === 'outofstock' ? 'Out of Stock' :
-                                 productData.product.stock_status || 'Unknown'}
-                              </span>
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Target Pricing Inputs */}
-                      <div className="mt-4 bg-green-50 rounded-lg p-3">
-                        <div className="flex justify-between items-center mb-3">
-                          <h5 className="font-medium text-charcoal">Target Pricing</h5>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => updateAdHocProduct(productData.id, 'inputMode', 'price')}
-                              className={`px-3 py-1 text-xs rounded ${
-                                productData.inputMode === 'price' 
-                                  ? 'bg-primary text-white' 
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                              }`}
-                            >
-                              Set Price
-                            </button>
-                            <button
-                              onClick={() => updateAdHocProduct(productData.id, 'inputMode', 'margin')}
-                              className={`px-3 py-1 text-xs rounded ${
-                                productData.inputMode === 'margin' 
-                                  ? 'bg-primary text-white' 
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                              }`}
-                            >
-                              Set Margin
-                            </button>
-                          </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                          {productData.inputMode === 'price' ? (
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Target Price (Incl. VAT)
-                              </label>
-                                                          <input
-                              type="number"
-                              step="1"
-                              value={productData.targetPrice || ''}
-                              onChange={(e) => updateAdHocProduct(productData.id, 'targetPrice', Math.round(parseFloat(e.target.value) || 0))}
-                              placeholder="Enter target price"
-                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                            />
-                            </div>
-                          ) : (
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Target Margin (%)
-                              </label>
-                              <input
-                                type="number"
-                                step="1"
-                                value={productData.targetMargin || ''}
-                                onChange={(e) => updateAdHocProduct(productData.id, 'targetMargin', Math.round(parseFloat(e.target.value) || 0))}
-                                placeholder="Enter target margin %"
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                              />
-                            </div>
-                          )}
-                          
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Quantity
-                            </label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={productData.quantity}
-                              onChange={(e) => updateAdHocProduct(productData.id, 'quantity', parseInt(e.target.value) || 1)}
-                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Target Price (Incl. VAT)
-                            </label>
-                            <div className="px-2 py-1 bg-gray-100 rounded text-sm text-charcoal">
-                              {productData.targetPrice > 0 ? `R${Math.round(productData.targetPrice)}` : 'Enter price first'}
-                            </div>
-                          </div>
-                          
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              {productData.inputMode === 'price' ? 'Calculated Margin (%)' : 'Calculated Price (Incl. VAT)'}
-                            </label>
-                            <div className="px-2 py-1 bg-gray-100 rounded text-sm text-charcoal">
-                              {productData.inputMode === 'price' 
-                                ? (productData.targetPrice > 0 ? `${Math.round(calculations.targetMarginPercent)}%` : 'Enter price first')
-                                : (productData.targetMargin > 0 ? `R${Math.round(productData.targetPrice)}` : 'Enter margin first')
-                              }
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Margin Analysis Results */}
-                      {productData.targetPrice > 0 && (
-                        <div className="mt-4 bg-yellow-50 rounded-lg p-3">
-                          <h5 className="font-medium text-charcoal mb-3">Margin Analysis</h5>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="font-medium text-gray-600">Target Margin (R):</span>
-                              <p className={`font-semibold ${calculations.targetMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                R{Math.round(calculations.targetMargin)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-600">Target Margin (%):</span>
-                              <p className={`font-semibold ${calculations.targetMarginPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {Math.round(calculations.targetMarginPercent)}%
-                              </p>
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-600">Total Sales Value:</span>
-                              <p className="font-semibold text-blue-600">
-                                R{Math.round(calculations.totalSalesValue)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="font-medium text-gray-600">Total GP:</span>
-                              <p className={`font-semibold ${calculations.totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                R{Math.round(calculations.totalMargin)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-2 text-xs text-gray-600">
-                            <p>All prices include 15% VAT | Sales Value: R{Math.round(calculations.totalSalesValue)}</p>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {productData.targetPrice === 0 && (
-                        <div className="mt-4 bg-gray-50 rounded-lg p-3">
-                          <p className="text-sm text-gray-600 text-center">
-                            Enter a target price or margin to see margin analysis
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                </div>
               </div>
-            )}
+            </div>
 
             {/* Approved Products Table */}
             {adHocPlan.approvedProducts.length > 0 && (
               <div className="mt-8">
+                {/* TOTALS AT THE TOP */}
+                <div className="bg-green-50 rounded-lg p-6 mb-6">
+                  <h3 className="text-xl font-semibold text-charcoal mb-4">Product Analysis Totals</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-600">Total Products:</span>
+                      <p className="text-2xl font-bold text-green-600">{calculateApprovedTotals().productCount}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total Quantity:</span>
+                      <p className="text-2xl font-bold text-purple-600">{adHocPlan.approvedProducts.reduce((sum, p) => sum + p.quantity, 0)}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total Purchase Cost:</span>
+                      <p className="text-2xl font-bold text-orange-600">R{calculateApprovedTotals().totalPurchaseCost}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total Sales Value:</span>
+                      <p className="text-2xl font-bold text-blue-600">R{calculateApprovedTotals().totalSalesValue}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Total GP:</span>
+                      <p className={`text-2xl font-bold ${calculateApprovedTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        R{calculateApprovedTotals().totalMargin}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="bg-white rounded-lg shadow-lg p-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold text-charcoal">Approved Products</h3>
+                    <h3 className="text-xl font-semibold text-charcoal">Product Details</h3>
                     <div className="flex gap-2">
                       <button
                         onClick={printApprovedProducts}
@@ -2839,35 +2816,6 @@ export default function Home() {
                       >
                         📋 Open in Google Sheets
                       </button>
-                    </div>
-                  </div>
-                  
-                  {/* Approved Products Summary */}
-                  <div className="bg-green-50 rounded-lg p-4 mb-6">
-                    <h4 className="text-lg font-medium text-charcoal mb-3">Approved Products Summary</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium text-gray-600">Approved Products:</span>
-                        <p className="text-lg font-semibold text-green-600">{calculateApprovedTotals().productCount}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">Total Purchase Value:</span>
-                        <p className="text-lg font-semibold text-purple-600">R{calculateApprovedTotals().totalPurchaseCost}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">Total Sales Value:</span>
-                        <p className="text-lg font-semibold text-blue-600">R{calculateApprovedTotals().totalSalesValue}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">Total GP:</span>
-                        <p className={`text-lg font-semibold ${calculateApprovedTotals().totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          R{calculateApprovedTotals().totalMargin}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-600">All Prices Include VAT:</span>
-                        <p className="text-lg font-semibold text-orange-600">15%</p>
-                      </div>
                     </div>
                   </div>
 

@@ -1,0 +1,30 @@
+      if (planningMode === 'daily') {
+        // Debug logging
+        console.log('Generating daily plan with:', {
+          productsCount: products.length,
+          dailySelections: dailySelections[0],
+          planningMode
+        });
+
+        // Validate dailySelections
+        if (!dailySelections || dailySelections.length === 0 || !dailySelections[0]) {
+          setError('Daily category selections are not properly configured. Please refresh the page and try again.');
+          setLoading(false);
+          return;
+        }
+
+        // Generate daily promotion plan using the first day's selections
+        const plan = generateDailyPromotionPlan(products, dailySelections[0] as [string, string, string]);
+        
+        // Validate the generated plan
+        if (!plan || !plan.products) {
+          setError('Failed to generate daily plan. The plan generation returned invalid data.');
+          setLoading(false);
+          return;
+        }
+
+        setDailyPlan(plan);
+        setWeeklyPlan(null);
+        setMonthlyPlan(null);
+        setSuccess(`Successfully generated a daily promotion plan with ${plan.products.length} products!`);
+      }
