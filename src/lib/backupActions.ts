@@ -375,9 +375,9 @@ export async function loadFullApplicationState(sessionId: string): Promise<FullA
       adHocPlan: adHocPlan ? {
         isOpen: adHocPlan.is_active || false,
         products: adHocPlan.products || [],
-        approvedProducts: (adHocPlan.approved_products || []).map((ap: any) => ({
+        approvedProducts: (adHocPlan.approved_products || []).map((ap: Record<string, unknown>) => ({
           ...ap,
-          approvedAt: ap.approvedAt ? new Date(ap.approvedAt) : new Date()
+          approvedAt: ap.approvedAt ? new Date(ap.approvedAt as string | number | Date) : new Date()
         })),
         currentProductId: adHocPlan.current_product_id || '',
         maxProducts: adHocPlan.max_products || 30

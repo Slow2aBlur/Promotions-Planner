@@ -31,10 +31,11 @@ import {
   getSortedSessionIndex, 
   getSessionSnapshot 
 } from '@/lib/sessionManager';
-import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration, SessionIndexEntry } from '@/lib/types';
+import { Product, DayPlan, WeeklyPlan, MonthlyPlan, DailyCategorySelections, WeeklyCategorySelections, WeeklyConfiguration, SessionIndexEntry, BuilderBundle } from '@/lib/types';
 import ProductSearchModal from '@/components/ProductSearchModal';
 import SavePromotionModal from '@/components/SavePromotionModal';
 import BundleModal from '@/components/BundleModal';
+import BundleBuilder from '@/components/BundleBuilder';
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -64,7 +65,8 @@ export default function Home() {
   
   const [dailyPlan, setDailyPlan] = useState<DayPlan | null>(null);
   
-  const [planningMode, setPlanningMode] = useState<'daily' | 'weekly' | 'monthly' | 'adHoc'>('daily');
+  const [planningMode, setPlanningMode] = useState<'daily' | 'weekly' | 'monthly' | 'adHoc' | 'bundles'>('daily');
+  const [builderBundles, setBuilderBundles] = useState<BuilderBundle[]>([]);
   
   // Weekly planning configuration
   const [weeklyConfig, setWeeklyConfig] = useState<WeeklyConfiguration>({
@@ -2123,10 +2125,10 @@ export default function Home() {
                   <td>${row['Supplier']}</td>
                   <td class="number">R${row['Cost']}</td>
                   <td class="number">R${row['Promo Price']}</td>
-                  <td class="number ${row['Margin %'] >= 0 ? 'positive' : 'negative'}">${row['Margin %']}%</td>
+                  <td class="number ${Number(row['Margin %']) >= 0 ? 'positive' : 'negative'}">${row['Margin %']}%</td>
                   <td class="number">${row['Quantity']}</td>
                   <td class="number">R${row['Total Value']}</td>
-                  <td class="number ${row['Total GP'] >= 0 ? 'positive' : 'negative'}">R${row['Total GP']}</td>
+                  <td class="number ${Number(row['Total GP']) >= 0 ? 'positive' : 'negative'}">R${row['Total GP']}</td>
                   <td>${row['Approved Date']}</td>
                 </tr>
               `).join('')}
@@ -2605,6 +2607,26 @@ export default function Home() {
                 >
                   🗓️ Monthly Planning
                 </button>
+                <button
+                  onClick={() => setPlanningMode('adHoc')}
+                  className={`px-4 sm:px-6 py-3 rounded-lg font-medium transition-colors text-sm sm:text-base ${
+                    planningMode === 'adHoc'
+                      ? 'bg-primary text-white'
+                      : 'bg-gray-100 text-charcoal hover:bg-gray-200'
+                  }`}
+                >
+                  🛠️ Ad-hoc
+                </button>
+                <button
+                  onClick={() => setPlanningMode('bundles')}
+                  className={`px-4 sm:px-6 py-3 rounded-lg font-medium transition-colors text-sm sm:text-base ${
+                    planningMode === 'bundles'
+                      ? 'bg-primary text-white'
+                      : 'bg-gray-100 text-charcoal hover:bg-gray-200'
+                  }`}
+                >
+                  🎁 Bundles
+                </button>
               </div>
             </div>
           </div>
@@ -2703,6 +2725,21 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Bundle Builder mode */}
+        {planningMode === 'bundles' && (
+          <div className="bg-white rounded-lg shadow-md p-4 mb-8">
+            <h3 className="text-lg font-semibold text-charcoal mb-2">Bundle Builder</h3>
+            <BundleBuilder
+              products={products}
+              onSaveBundles={(bundles) => {
+                setBuilderBundles(bundles);
+                setSuccess(`${bundles.length} bundle(s) saved`);
+                setIsDirty(true);
+              }}
+            />
           </div>
         )}
 
@@ -4024,7 +4061,7 @@ export default function Home() {
           isOpen={isSaveModalOpen}
           onClose={() => setIsSaveModalOpen(false)}
           onSave={handleSavePromotion}
-          planningMode={planningMode}
+          planningMode={planningMode as "daily" | "weekly" | "monthly" | "adHoc"}
         />
 
         {/* Bundle Modal */}

@@ -137,6 +137,8 @@ export interface SessionSnapshot {
     selectedRows: string[];
     scrollPosition: number;
   };
+  // Independent bundles created via Bundle Builder
+  builderBundles?: BuilderBundle[];
 }
 
 export interface SessionIndexEntry {
@@ -147,4 +149,23 @@ export interface SessionIndexEntry {
   sourceFile: string;
   itemCount: number;
   bundleCount: number;
+}
+
+// Bundle Builder types (independent from promotion plans)
+export type BuilderPricingMode = 'Manual' | 'Sum' | 'Discount';
+
+export interface BuilderBundleItem {
+  productId: string;
+  product: Product;
+  qty: number;
+}
+
+export interface BuilderBundle {
+  id: string;
+  name: string; // e.g., "Bundle 1"
+  items: BuilderBundleItem[];
+  pricingMode: BuilderPricingMode;
+  bundlePrice: number; // resolved price based on pricing mode
+  discountPct?: number; // when pricingMode === 'Discount'
+  createdAt: Date;
 }
