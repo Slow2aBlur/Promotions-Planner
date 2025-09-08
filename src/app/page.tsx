@@ -734,14 +734,19 @@ export default function Home() {
         return;
       }
 
+      // Calculate default target price based on -5% GP margin
+      const purchaseCost = product.purchase_cost || 0;
+      const defaultTargetPrice = purchaseCost > 0 ? Math.round(purchaseCost / 1.05) : 0;
+      const defaultTargetMargin = -5; // -5% GP as per UI defaults
+
       const newProduct = {
         id: `product_${Date.now()}`,
         productId: adHocPlan.currentProductId,
         product,
-        targetPrice: 0,
-        targetMargin: 0,
+        targetPrice: defaultTargetPrice,
+        targetMargin: defaultTargetMargin,
         inputMode: 'price' as 'price' | 'margin',
-        quantity: 1
+        quantity: 5 // Default quantity as per UI
       };
 
       setAdHocPlan(prev => ({

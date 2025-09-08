@@ -158,6 +158,7 @@ export interface BuilderBundleItem {
   productId: string;
   product: Product;
   qty: number;
+  proposedPrice?: number; // User's proposed price for this item
 }
 
 export interface BuilderBundle {
