@@ -1666,6 +1666,7 @@ export default function Home() {
     setDailyPlan(null);
     setWeeklyPlan(null);
     setMonthlyPlan(null);
+    
     // Reset daily selections
     setDailySelections([
       ['Random', 'Random', 'Random'], // Monday
@@ -1676,6 +1677,7 @@ export default function Home() {
       ['Random', 'Random', 'Random'], // Saturday
       ['Random', 'Random', 'Random']  // Sunday
     ]);
+    
     // Reset weekly selections
     setWeeklySelections([
       ['Random', 'Random', 'Random'], // Week 1
@@ -1683,17 +1685,85 @@ export default function Home() {
       ['Random', 'Random', 'Random'], // Week 3
       ['Random', 'Random', 'Random']  // Week 4
     ]);
-    setError(null);
-    setSuccess(null);
-    setUploadedFileName('');
-    setLastUploadedFile(null);
-    setReplacementModal({ isOpen: false, productToReplace: null, dayIndex: -1, productIndex: -1, weekIndex: -1, isMonthly: false, viewType: 'daily' });
+    
+    // Reset planning mode and bundles
     setPlanningMode('daily');
+    setBuilderBundles([]);
+    
+    // Reset weekly configuration
     setWeeklyConfig({
       numberOfWeeks: 1,
-        weeks: [{ startDate: '', endDate: '', targetGPMargin: 0 }]
+      weeks: [{ startDate: '', endDate: '', targetGPMargin: 0 }]
     });
     
+    // Reset weekly category configuration
+    setWeeklyCategoryConfig({
+      numberOfCategories: 3,
+      productsPerCategory: 3
+    });
+    
+    // Reset expected quantity
+    setExpectedQuantity(5);
+    
+    // Reset ad-hoc plan
+    setAdHocPlan({
+      isOpen: false,
+      products: [],
+      approvedProducts: [],
+      currentProductId: '',
+      maxProducts: 50
+    });
+    
+    // Reset bundles
+    setBundles([]);
+    setIsBundleModalOpen(false);
+    setBundleCreation({
+      bundleName: '',
+      description: '',
+      selectedProducts: [],
+      bundlePrice: 0
+    });
+    
+    // Reset modals and UI state
+    setReplacementModal({ isOpen: false, productToReplace: null, dayIndex: -1, productIndex: -1, weekIndex: -1, isMonthly: false, viewType: 'daily' });
+    setCategoryAlternativeModal({
+      isOpen: false,
+      emptyCategories: [],
+      insufficientCategories: [],
+      availableByCategory: {},
+      alternatives: [],
+      pendingSelections: null,
+      isMonthly: false
+    });
+    setIsAddProductOpen(false);
+    
+    // Reset session management
+    setCurrentSessionId(null);
+    setIsDirty(false);
+    setSessionIndex([]);
+    setIsSaving(false);
+    setAutoSaveLabel('Auto-save (30s)');
+    setIsSessionManagerOpen(false);
+    setSourceFileHash('');
+    
+    // Reset backup state
+    setBackupSessionId(null);
+    setAvailableSessions([]);
+    setIsBackupModalOpen(false);
+    setIsSaveModalOpen(false);
+    setAutoSaveEnabled(true);
+    setLastAutoSave(null);
+    
+    // Reset date inputs and view mode
+    setDateInputs({});
+    setPlanViewMode('daily');
+    
+    // Reset file state
+    setUploadedFileName('');
+    setLastUploadedFile(null);
+    
+    // Reset messages
+    setError(null);
     setSuccess('Complete reset successful! Upload a new CSV file to start fresh.');
     setTimeout(() => setSuccess(null), 3000);
   };
@@ -1703,6 +1773,7 @@ export default function Home() {
     setDailyPlan(null);
     setWeeklyPlan(null);
     setMonthlyPlan(null);
+    
     // Reset daily selections
     setDailySelections([
       ['Random', 'Random', 'Random'], // Monday
@@ -1713,6 +1784,7 @@ export default function Home() {
       ['Random', 'Random', 'Random'], // Saturday
       ['Random', 'Random', 'Random']  // Sunday
     ]);
+    
     // Reset weekly selections
     setWeeklySelections([
       ['Random', 'Random', 'Random'], // Week 1
@@ -1720,10 +1792,63 @@ export default function Home() {
       ['Random', 'Random', 'Random'], // Week 3
       ['Random', 'Random', 'Random']  // Week 4
     ]);
-    setError(null);
-    setSuccess(null);
-    setReplacementModal({ isOpen: false, productToReplace: null, dayIndex: -1, productIndex: -1, weekIndex: -1, isMonthly: false, viewType: 'daily' });
     
+    // Reset planning mode to daily
+    setPlanningMode('daily');
+    
+    // Reset weekly configuration
+    setWeeklyConfig({
+      numberOfWeeks: 1,
+      weeks: [{ startDate: '', endDate: '', targetGPMargin: 0 }]
+    });
+    
+    // Reset weekly category configuration
+    setWeeklyCategoryConfig({
+      numberOfCategories: 3,
+      productsPerCategory: 3
+    });
+    
+    // Reset expected quantity
+    setExpectedQuantity(5);
+    
+    // Reset ad-hoc plan (but keep products loaded)
+    setAdHocPlan(prev => ({
+      ...prev,
+      isOpen: false,
+      products: [],
+      approvedProducts: [],
+      currentProductId: ''
+    }));
+    
+    // Reset bundles
+    setBundles([]);
+    setBuilderBundles([]);
+    setIsBundleModalOpen(false);
+    setBundleCreation({
+      bundleName: '',
+      description: '',
+      selectedProducts: [],
+      bundlePrice: 0
+    });
+    
+    // Reset modals
+    setReplacementModal({ isOpen: false, productToReplace: null, dayIndex: -1, productIndex: -1, weekIndex: -1, isMonthly: false, viewType: 'daily' });
+    setCategoryAlternativeModal({
+      isOpen: false,
+      emptyCategories: [],
+      insufficientCategories: [],
+      availableByCategory: {},
+      alternatives: [],
+      pendingSelections: null,
+      isMonthly: false
+    });
+    setIsAddProductOpen(false);
+    
+    // Reset view mode
+    setPlanViewMode('daily');
+    
+    // Reset messages
+    setError(null);
     setSuccess('Plans reset! Your products and categories are preserved. Generate a new plan.');
     setTimeout(() => setSuccess(null), 3000);
   };
